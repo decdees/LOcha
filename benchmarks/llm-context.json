@@ -1,0 +1,42 @@
+{
+  "repo": "mlx-community/gemma-4-26b-a4b-it-4bit",
+  "weights_gb": 14.202810516,
+  "rows": [
+    {
+      "requested": 256,
+      "actual_tokens": 256,
+      "ttft_s": 1.604,
+      "prefill_tok_per_s": 160.0,
+      "decode_tok_per_s": 37.7,
+      "peak_gb": 14.48,
+      "kv_gb": 0.27
+    },
+    {
+      "requested": 1024,
+      "actual_tokens": 1024,
+      "ttft_s": 2.597,
+      "prefill_tok_per_s": 394.0,
+      "decode_tok_per_s": 36.0,
+      "peak_gb": 15.01,
+      "kv_gb": 0.8
+    },
+    {
+      "requested": 4096,
+      "actual_tokens": 4096,
+      "ttft_s": 11.025,
+      "prefill_tok_per_s": 372.0,
+      "decode_tok_per_s": 32.1,
+      "peak_gb": 15.95,
+      "kv_gb": 1.75
+    },
+    {
+      "requested": 8192,
+      "actual_tokens": 8192,
+      "ttft_s": 32.581,
+      "prefill_tok_per_s": 251.0,
+      "decode_tok_per_s": 14.3,
+      "peak_gb": 16.14,
+      "kv_gb": 1.94
+    }
+  ]
+}

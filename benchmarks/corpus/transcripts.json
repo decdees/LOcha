@@ -1,0 +1,219 @@
+{
+  "_about": "T0.2 ground truth for the T0.3 ASR bake-off. Sentences authored before recording, so truth is known in advance. record.py sets verified=true per take and writes back any correction.",
+  "_ground_truth_rule": "text MUST be what was actually said, not what was printed. CER against a sentence the speaker misread measures nothing. If you deviate, answer 'n' at the confirmation prompt and type the actual utterance.",
+  "_cer_normalization": "Applied at scoring time, not stored here: NFKC, strip ALL whitespace (Japanese is unspaced, so ASR whitespace is noise), strip 、。！？「」,.!?, lowercase ASCII. Then Levenshtein / len(reference), via jiwer for the sub/ins/del split.",
+  "_alt_ok_rule": "IMPORTANT, affects T0.3's two-stage rule. For code-switched items, a faithful katakana transliteration of an English word (receipt -> レシート) is USABLE as LLM input and must NOT count as a Stage 1 catastrophic failure -- Stage 1 fails only on a dropped English span or genuinely nonsense output. But it IS a CER error against the English-orthography reference in Stage 2. alt_ok lists renderings that pass Stage 1 while still scoring as Stage 2 error. Do not silently normalize them away; that would hide a real difference between models.",
+  "_subsets": {
+    "pure_ja": 10,
+    "code_switched": 10
+  },
+  "_audio": "16 kHz, mono, 16-bit PCM WAV. One file per id, <id>.wav, alongside this file.",
+  "utterances": [
+    {
+      "id": "01",
+      "subset": "pure_ja",
+      "text": "はじめまして、よろしくお願いします。",
+      "gloss": "Nice to meet you.",
+      "covers": "formulaic greeting; お- prefix; long polite ending",
+      "verified": true,
+      "romaji": "hajimemashite, yoroshiku onegaishimasu"
+    },
+    {
+      "id": "02",
+      "subset": "pure_ja",
+      "text": "すみません、駅はどこですか。",
+      "gloss": "Excuse me, where is the station?",
+      "covers": "moraic ん x2; は as topic particle (read wa, not ha)",
+      "verified": true,
+      "romaji": "sumimasen, eki wa doko desu ka"
+    },
+    {
+      "id": "03",
+      "subset": "pure_ja",
+      "text": "これをください。",
+      "gloss": "This one, please.",
+      "covers": "shortest utterance in the set; を particle",
+      "verified": true,
+      "romaji": "kore o kudasai"
+    },
+    {
+      "id": "04",
+      "subset": "pure_ja",
+      "text": "これはいくらですか。",
+      "gloss": "How much is this?",
+      "covers": "は particle; no kanji at all",
+      "verified": true,
+      "romaji": "kore wa ikura desu ka"
+    },
+    {
+      "id": "05",
+      "subset": "pure_ja",
+      "text": "日本語が少しわかります。",
+      "gloss": "I understand a little Japanese.",
+      "covers": "kanji compound; が particle; ます form",
+      "verified": true,
+      "romaji": "nihongo ga sukoshi wakarimasu"
+    },
+    {
+      "id": "06",
+      "subset": "pure_ja",
+      "text": "コーヒーを一つお願いします。",
+      "gloss": "One coffee, please.",
+      "covers": "long vowel ー x2 in katakana; counter 一つ",
+      "verified": true,
+      "romaji": "koohii o hitotsu onegaishimasu"
+    },
+    {
+      "id": "07",
+      "subset": "pure_ja",
+      "text": "ちょっと待ってください。",
+      "gloss": "Please wait a moment.",
+      "covers": "geminate っ x2 -- the classic Japanese CER failure",
+      "verified": true,
+      "romaji": "chotto matte kudasai"
+    },
+    {
+      "id": "08",
+      "subset": "pure_ja",
+      "text": "写真を撮ってもいいですか。",
+      "gloss": "May I take a photo?",
+      "covers": "geminate っ; permission form てもいい",
+      "verified": true,
+      "romaji": "shashin o totte mo ii desu ka"
+    },
+    {
+      "id": "09",
+      "subset": "pure_ja",
+      "text": "トイレはどこにありますか。",
+      "gloss": "Where is the toilet?",
+      "covers": "katakana loanword; に particle",
+      "verified": true,
+      "romaji": "toire wa doko ni arimasu ka"
+    },
+    {
+      "id": "10",
+      "subset": "pure_ja",
+      "text": "ありがとうございます、また明日。",
+      "gloss": "Thank you, see you tomorrow.",
+      "covers": "long vowel う; 明日 has multiple readings (あした/あす) but one written form",
+      "verified": true,
+      "romaji": "arigatou gozaimasu, mata ashita"
+    },
+    {
+      "id": "11",
+      "subset": "code_switched",
+      "text": "えーと、how do you say \"receipt\" in Japanese?",
+      "gloss": "Filler + full English question.",
+      "covers": "Japanese filler えーと then an entirely English clause -- worst case for a JA-only model",
+      "alt_ok": [
+        "レシート for receipt"
+      ],
+      "verified": true,
+      "romaji": "eeto, how do you say \"receipt\" in Japanese?"
+    },
+    {
+      "id": "12",
+      "subset": "code_switched",
+      "text": "すみません、Wi-Fiのpasswordは何ですか。",
+      "gloss": "Excuse me, what is the Wi-Fi password?",
+      "covers": "English nouns inside a Japanese frame, joined by の",
+      "alt_ok": [
+        "ワイファイ for Wi-Fi",
+        "パスワード for password"
+      ],
+      "verified": true,
+      "romaji": "sumimasen, Wi-Fi no password wa nan desu ka"
+    },
+    {
+      "id": "13",
+      "subset": "code_switched",
+      "text": "This is 美味しい ですね。",
+      "gloss": "This is delicious, isn't it.",
+      "covers": "reverse direction -- Japanese embedded in an English frame",
+      "verified": true,
+      "romaji": "This is oishii desu ne"
+    },
+    {
+      "id": "14",
+      "subset": "code_switched",
+      "text": "私は engineer です。",
+      "gloss": "I am an engineer.",
+      "covers": "single English noun in an otherwise minimal Japanese sentence",
+      "alt_ok": [
+        "エンジニア for engineer"
+      ],
+      "verified": true,
+      "romaji": "watashi wa engineer desu"
+    },
+    {
+      "id": "15",
+      "subset": "code_switched",
+      "text": "あの、check please、お願いします。",
+      "gloss": "Um, check please.",
+      "covers": "filler あの + English phrase + Japanese closing",
+      "alt_ok": [
+        "チェック for check"
+      ],
+      "verified": true,
+      "romaji": "ano, check please, onegaishimasu"
+    },
+    {
+      "id": "16",
+      "subset": "code_switched",
+      "text": "東京 station までいくらですか。",
+      "gloss": "How much to Tokyo station?",
+      "covers": "kanji place name + English noun + まで particle",
+      "alt_ok": [
+        "ステーション for station",
+        "駅 for station"
+      ],
+      "verified": true,
+      "romaji": "Toukyou station made ikura desu ka"
+    },
+    {
+      "id": "17",
+      "subset": "code_switched",
+      "text": "ごめんなさい、I don't understand、もう一度お願いします。",
+      "gloss": "Sorry, I don't understand, once more please.",
+      "covers": "full English clause between two Japanese ones; tests whether the middle is dropped",
+      "verified": true,
+      "romaji": "gomennasai, I don't understand, mou ichido onegaishimasu"
+    },
+    {
+      "id": "18",
+      "subset": "code_switched",
+      "text": "Can I pay with カード ですか。",
+      "gloss": "Can I pay with card?",
+      "covers": "katakana inside an English frame -- deliberately ungrammatical, as a real beginner would say it",
+      "verified": true,
+      "romaji": "Can I pay with kaado desu ka"
+    },
+    {
+      "id": "19",
+      "subset": "code_switched",
+      "text": "えっと、vegetarian の menu ありますか。",
+      "gloss": "Um, is there a vegetarian menu?",
+      "covers": "filler えっと (geminate) + two English nouns joined by の",
+      "alt_ok": [
+        "ベジタリアン for vegetarian",
+        "メニュー for menu"
+      ],
+      "verified": true,
+      "romaji": "etto, vegetarian no menu arimasu ka"
+    },
+    {
+      "id": "20",
+      "subset": "code_switched",
+      "text": "明日 の morning、七時に来ます。",
+      "gloss": "Tomorrow morning, I will come at seven.",
+      "covers": "kanji + English noun + time counter 七時",
+      "alt_ok": [
+        "モーニング for morning",
+        "朝 for morning"
+      ],
+      "verified": true,
+      "romaji": "ashita no morning, shichi-ji ni kimasu"
+    }
+  ],
+  "_reading_aid": "romaji is what the speaker reads aloud. The Japanese script in `text` is the CER reference and is shown only for context. gloss is NEVER displayed during recording -- an earlier version displayed it and the beginner speaker read the English instead, invalidating the whole corpus."
+}

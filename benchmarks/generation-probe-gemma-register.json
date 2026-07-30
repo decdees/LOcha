@@ -1,0 +1,122 @@
+[
+  {
+    "kind": "conversational",
+    "prompt": "こんにちは。",
+    "reply": "こんにちは。今日は何を食べるですか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "今日は元気ですか。",
+    "reply": "はい、元気です。あなたは今日、何を食べる？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "mixed: ['polite', 'plain']",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "私は水を飲みました。",
+    "reply": "いいですね。朝、何を食べますか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "明日どこに行きますか。",
+    "reply": "明日は駅の店に行きます。あなたは何か食べますか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "駅に行きます。",
+    "reply": "いいですね。そこで何を食べる（eat）ですか？",
+    "vocab": "0 out-of-vocab [], 1 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "友達と店に行きました。",
+    "reply": "いいですね。そこで何を食べますか？ (eat)",
+    "vocab": "0 out-of-vocab [], 1 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "コーヒーが好きです。",
+    "reply": "いいですね。朝、コーヒーを飲みますか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "本を見ました。",
+    "reply": "それは何ですか？\nいい本ですね。",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "先生はどこですか。",
+    "reply": "先生はそこにいます。あなたは今日、何を食べる（eat）ますか。",
+    "vocab": "0 out-of-vocab [], 1 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "車は高いです。",
+    "reply": "はい、車は高いです。あなたは車が好きですか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "昨日ご飯を食べました。",
+    "reply": "いいですね。何を食べましたか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "家にいます。",
+    "reply": "いいですね。今日は何を食べる（eat）予定ですか？",
+    "vocab": "1 out-of-vocab ['予定'], 1 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "これはいいですか。",
+    "reply": "はい、それはいいです。あなたは今日、何を食べる（eat）ますか。",
+    "vocab": "0 out-of-vocab [], 1 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "夜は何をしますか。",
+    "reply": "私は本を見ます。あなたは夜、何をしますか。",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  },
+  {
+    "kind": "conversational",
+    "prompt": "朝コーヒーを飲みます。",
+    "reply": "いいですね。朝、何を食べますか？",
+    "vocab": "0 out-of-vocab [], 0 gloss(es)",
+    "register": "polite",
+    "length": "2 sentence(s)"
+  }
+]

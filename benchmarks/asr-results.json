@@ -1,0 +1,629 @@
+{
+  "kotoba-whisper-v2.0": {
+    "model_id": "kotoba-tech/kotoba-whisper-v2.0",
+    "rows": [
+      {
+        "id": "01",
+        "subset": "pure_ja",
+        "ref": "はじめまして、よろしくお願いします。",
+        "hyp": "はじめましてよろしくお願いします",
+        "seconds": 1.132,
+        "alt_ok": []
+      },
+      {
+        "id": "02",
+        "subset": "pure_ja",
+        "ref": "すみません、駅はどこですか。",
+        "hyp": "すみません、駅は毒ですか?",
+        "seconds": 1.076,
+        "alt_ok": []
+      },
+      {
+        "id": "03",
+        "subset": "pure_ja",
+        "ref": "これをください。",
+        "hyp": "これをください",
+        "seconds": 0.968,
+        "alt_ok": []
+      },
+      {
+        "id": "04",
+        "subset": "pure_ja",
+        "ref": "これはいくらですか。",
+        "hyp": "これはいくらですか",
+        "seconds": 0.976,
+        "alt_ok": []
+      },
+      {
+        "id": "05",
+        "subset": "pure_ja",
+        "ref": "日本語が少しわかります。",
+        "hyp": "日本語がすごしわかります",
+        "seconds": 1.039,
+        "alt_ok": []
+      },
+      {
+        "id": "06",
+        "subset": "pure_ja",
+        "ref": "コーヒーを一つお願いします。",
+        "hyp": "コーヒーを一つお願いします",
+        "seconds": 1.122,
+        "alt_ok": []
+      },
+      {
+        "id": "07",
+        "subset": "pure_ja",
+        "ref": "ちょっと待ってください。",
+        "hyp": "チョット マッテクドサイ",
+        "seconds": 1.14,
+        "alt_ok": []
+      },
+      {
+        "id": "08",
+        "subset": "pure_ja",
+        "ref": "写真を撮ってもいいですか。",
+        "hyp": "写真をとてもいいですか",
+        "seconds": 1.066,
+        "alt_ok": []
+      },
+      {
+        "id": "09",
+        "subset": "pure_ja",
+        "ref": "トイレはどこにありますか。",
+        "hyp": "これはどこにありますか",
+        "seconds": 1.027,
+        "alt_ok": []
+      },
+      {
+        "id": "10",
+        "subset": "pure_ja",
+        "ref": "ありがとうございます、また明日。",
+        "hyp": "ありがとうございますまた明日",
+        "seconds": 1.002,
+        "alt_ok": []
+      },
+      {
+        "id": "11",
+        "subset": "code_switched",
+        "ref": "えーと、how do you say \"receipt\" in Japanese?",
+        "hyp": "イト、どういうスイット、レシピン、ジャパネース?",
+        "seconds": 1.341,
+        "alt_ok": [
+          "レシート for receipt"
+        ]
+      },
+      {
+        "id": "12",
+        "subset": "code_switched",
+        "ref": "すみません、Wi-Fiのpasswordは何ですか。",
+        "hyp": "すみませんWi-Fiのパスワーナンティスか",
+        "seconds": 1.265,
+        "alt_ok": [
+          "ワイファイ for Wi-Fi",
+          "パスワード for password"
+        ]
+      },
+      {
+        "id": "13",
+        "subset": "code_switched",
+        "ref": "This is 美味しい ですね。",
+        "hyp": "ですしおしそうね",
+        "seconds": 0.987,
+        "alt_ok": []
+      },
+      {
+        "id": "14",
+        "subset": "code_switched",
+        "ref": "私は engineer です。",
+        "hyp": "私はエンジニアです",
+        "seconds": 1.061,
+        "alt_ok": [
+          "エンジニア for engineer"
+        ]
+      },
+      {
+        "id": "15",
+        "subset": "code_switched",
+        "ref": "あの、check please、お願いします。",
+        "hyp": "アンノ、チェック、お願いします。",
+        "seconds": 1.194,
+        "alt_ok": [
+          "チェック for check"
+        ]
+      },
+      {
+        "id": "16",
+        "subset": "code_switched",
+        "ref": "東京 station までいくらですか。",
+        "hyp": "東京ステーションメイクルーですか",
+        "seconds": 1.17,
+        "alt_ok": [
+          "ステーション for station",
+          "駅 for station"
+        ]
+      },
+      {
+        "id": "17",
+        "subset": "code_switched",
+        "ref": "ごめんなさい、I don't understand、もう一度お願いします。",
+        "hyp": "ごめんなさい。",
+        "seconds": 1.212,
+        "alt_ok": []
+      },
+      {
+        "id": "18",
+        "subset": "code_switched",
+        "ref": "Can I pay with カード ですか。",
+        "hyp": "キャナイフェイブカドレスカ",
+        "seconds": 1.217,
+        "alt_ok": []
+      },
+      {
+        "id": "19",
+        "subset": "code_switched",
+        "ref": "えっと、vegetarian の menu ありますか。",
+        "hyp": "えっと、ベジタリアノメニューありますか?",
+        "seconds": 1.224,
+        "alt_ok": [
+          "ベジタリアン for vegetarian",
+          "メニュー for menu"
+        ]
+      },
+      {
+        "id": "20",
+        "subset": "code_switched",
+        "ref": "明日 の morning、七時に来ます。",
+        "hyp": "明日のモーニング7時に来ます",
+        "seconds": 1.155,
+        "alt_ok": [
+          "モーニング for morning",
+          "朝 for morning"
+        ]
+      }
+    ],
+    "scores": {
+      "overall": {
+        "cer": 53.56,
+        "sub": 101,
+        "ins": 1,
+        "del": 71,
+        "ref_chars": 323
+      },
+      "pure_ja": {
+        "cer": 17.09,
+        "sub": 16,
+        "ins": 1,
+        "del": 3,
+        "ref_chars": 117
+      },
+      "code_switched": {
+        "cer": 74.27,
+        "sub": 85,
+        "ins": 0,
+        "del": 68,
+        "ref_chars": 206
+      },
+      "latency_p50": 1.132,
+      "latency_p95": 1.265,
+      "latency_total": 22.4
+    }
+  },
+  "kotoba-whisper-bilingual-v1.0": {
+    "model_id": "kotoba-tech/kotoba-whisper-bilingual-v1.0",
+    "rows": [
+      {
+        "id": "01",
+        "subset": "pure_ja",
+        "ref": "はじめまして、よろしくお願いします。",
+        "hyp": "はじめましてよろしくお願いします",
+        "seconds": 1.097,
+        "alt_ok": []
+      },
+      {
+        "id": "02",
+        "subset": "pure_ja",
+        "ref": "すみません、駅はどこですか。",
+        "hyp": "すみません駅は毒ですか",
+        "seconds": 1.071,
+        "alt_ok": []
+      },
+      {
+        "id": "03",
+        "subset": "pure_ja",
+        "ref": "これをください。",
+        "hyp": "これをください",
+        "seconds": 1.013,
+        "alt_ok": []
+      },
+      {
+        "id": "04",
+        "subset": "pure_ja",
+        "ref": "これはいくらですか。",
+        "hyp": "これはいくらですか?",
+        "seconds": 1.01,
+        "alt_ok": []
+      },
+      {
+        "id": "05",
+        "subset": "pure_ja",
+        "ref": "日本語が少しわかります。",
+        "hyp": "日本語が少しわかります",
+        "seconds": 1.051,
+        "alt_ok": []
+      },
+      {
+        "id": "06",
+        "subset": "pure_ja",
+        "ref": "コーヒーを一つお願いします。",
+        "hyp": "コーヒーを1つお願いいたします",
+        "seconds": 1.153,
+        "alt_ok": []
+      },
+      {
+        "id": "07",
+        "subset": "pure_ja",
+        "ref": "ちょっと待ってください。",
+        "hyp": "ちょっと待てくださえ",
+        "seconds": 1.071,
+        "alt_ok": []
+      },
+      {
+        "id": "08",
+        "subset": "pure_ja",
+        "ref": "写真を撮ってもいいですか。",
+        "hyp": "写真おとてもいいですか",
+        "seconds": 1.072,
+        "alt_ok": []
+      },
+      {
+        "id": "09",
+        "subset": "pure_ja",
+        "ref": "トイレはどこにありますか。",
+        "hyp": "これはどこにありますか?",
+        "seconds": 1.089,
+        "alt_ok": []
+      },
+      {
+        "id": "10",
+        "subset": "pure_ja",
+        "ref": "ありがとうございます、また明日。",
+        "hyp": "ありがとうございます。また明日。",
+        "seconds": 1.032,
+        "alt_ok": []
+      },
+      {
+        "id": "11",
+        "subset": "code_switched",
+        "ref": "えーと、how do you say \"receipt\" in Japanese?",
+        "hyp": "糸とはどういうセーフィンジェプニーズ",
+        "seconds": 1.252,
+        "alt_ok": [
+          "レシート for receipt"
+        ]
+      },
+      {
+        "id": "12",
+        "subset": "code_switched",
+        "ref": "すみません、Wi-Fiのpasswordは何ですか。",
+        "hyp": "すみませんWi-Fiのパスワールはなんでスカー",
+        "seconds": 1.262,
+        "alt_ok": [
+          "ワイファイ for Wi-Fi",
+          "パスワード for password"
+        ]
+      },
+      {
+        "id": "13",
+        "subset": "code_switched",
+        "ref": "This is 美味しい ですね。",
+        "hyp": "これはおしいですお姉さん",
+        "seconds": 1.091,
+        "alt_ok": []
+      },
+      {
+        "id": "14",
+        "subset": "code_switched",
+        "ref": "私は engineer です。",
+        "hyp": "私はエンジニアです",
+        "seconds": 1.086,
+        "alt_ok": [
+          "エンジニア for engineer"
+        ]
+      },
+      {
+        "id": "15",
+        "subset": "code_switched",
+        "ref": "あの、check please、お願いします。",
+        "hyp": "アンノチェックプリースお願いいたします",
+        "seconds": 1.242,
+        "alt_ok": [
+          "チェック for check"
+        ]
+      },
+      {
+        "id": "16",
+        "subset": "code_switched",
+        "ref": "東京 station までいくらですか。",
+        "hyp": "東京ステーションメイクルーですか?",
+        "seconds": 1.26,
+        "alt_ok": [
+          "ステーション for station",
+          "駅 for station"
+        ]
+      },
+      {
+        "id": "17",
+        "subset": "code_switched",
+        "ref": "ごめんなさい、I don't understand、もう一度お願いします。",
+        "hyp": "ごめんなさい i don't understandもう一度わんわんございます",
+        "seconds": 1.265,
+        "alt_ok": []
+      },
+      {
+        "id": "18",
+        "subset": "code_switched",
+        "ref": "Can I pay with カード ですか。",
+        "hyp": "キャナイフェイルでカド・デルスカ",
+        "seconds": 1.274,
+        "alt_ok": []
+      },
+      {
+        "id": "19",
+        "subset": "code_switched",
+        "ref": "えっと、vegetarian の menu ありますか。",
+        "hyp": "えっと、ベジタリアンのメニューありますか?",
+        "seconds": 1.275,
+        "alt_ok": [
+          "ベジタリアン for vegetarian",
+          "メニュー for menu"
+        ]
+      },
+      {
+        "id": "20",
+        "subset": "code_switched",
+        "ref": "明日 の morning、七時に来ます。",
+        "hyp": "明日のモーニング7時に来ます",
+        "seconds": 1.189,
+        "alt_ok": [
+          "モーニング for morning",
+          "朝 for morning"
+        ]
+      }
+    ],
+    "scores": {
+      "overall": {
+        "cer": 46.44,
+        "sub": 100,
+        "ins": 11,
+        "del": 39,
+        "ref_chars": 323
+      },
+      "pure_ja": {
+        "cer": 11.11,
+        "sub": 7,
+        "ins": 2,
+        "del": 4,
+        "ref_chars": 117
+      },
+      "code_switched": {
+        "cer": 66.5,
+        "sub": 93,
+        "ins": 9,
+        "del": 35,
+        "ref_chars": 206
+      },
+      "latency_p50": 1.097,
+      "latency_p95": 1.274,
+      "latency_total": 22.9
+    }
+  },
+  "whisper-large-v3": {
+    "model_id": "openai/whisper-large-v3",
+    "rows": [
+      {
+        "id": "01",
+        "subset": "pure_ja",
+        "ref": "はじめまして、よろしくお願いします。",
+        "hyp": "はじめましてよろしくお願いいたします。",
+        "seconds": 3.328,
+        "alt_ok": []
+      },
+      {
+        "id": "02",
+        "subset": "pure_ja",
+        "ref": "すみません、駅はどこですか。",
+        "hyp": "すみません、駅はどこですか?",
+        "seconds": 3.336,
+        "alt_ok": []
+      },
+      {
+        "id": "03",
+        "subset": "pure_ja",
+        "ref": "これをください。",
+        "hyp": "これをください",
+        "seconds": 2.492,
+        "alt_ok": []
+      },
+      {
+        "id": "04",
+        "subset": "pure_ja",
+        "ref": "これはいくらですか。",
+        "hyp": "これは、いくらですか?",
+        "seconds": 2.505,
+        "alt_ok": []
+      },
+      {
+        "id": "05",
+        "subset": "pure_ja",
+        "ref": "日本語が少しわかります。",
+        "hyp": "日本語が少しわかります。",
+        "seconds": 2.922,
+        "alt_ok": []
+      },
+      {
+        "id": "06",
+        "subset": "pure_ja",
+        "ref": "コーヒーを一つお願いします。",
+        "hyp": "コーヒーを一つお願いします",
+        "seconds": 2.997,
+        "alt_ok": []
+      },
+      {
+        "id": "07",
+        "subset": "pure_ja",
+        "ref": "ちょっと待ってください。",
+        "hyp": "ちょっと待ってください",
+        "seconds": 3.445,
+        "alt_ok": []
+      },
+      {
+        "id": "08",
+        "subset": "pure_ja",
+        "ref": "写真を撮ってもいいですか。",
+        "hyp": "写真を撮ってもいいですか?",
+        "seconds": 3.444,
+        "alt_ok": []
+      },
+      {
+        "id": "09",
+        "subset": "pure_ja",
+        "ref": "トイレはどこにありますか。",
+        "hyp": "これは どこにありますか",
+        "seconds": 2.803,
+        "alt_ok": []
+      },
+      {
+        "id": "10",
+        "subset": "pure_ja",
+        "ref": "ありがとうございます、また明日。",
+        "hyp": "ありがとうございますまた明日",
+        "seconds": 2.529,
+        "alt_ok": []
+      },
+      {
+        "id": "11",
+        "subset": "code_switched",
+        "ref": "えーと、how do you say \"receipt\" in Japanese?",
+        "hyp": "Eto, how do you say received in Japanese?",
+        "seconds": 3.275,
+        "alt_ok": [
+          "レシート for receipt"
+        ]
+      },
+      {
+        "id": "12",
+        "subset": "code_switched",
+        "ref": "すみません、Wi-Fiのpasswordは何ですか。",
+        "hyp": "すみません。Wi-Fiのパスワードは何ですか?",
+        "seconds": 4.25,
+        "alt_ok": [
+          "ワイファイ for Wi-Fi",
+          "パスワード for password"
+        ]
+      },
+      {
+        "id": "13",
+        "subset": "code_switched",
+        "ref": "This is 美味しい ですね。",
+        "hyp": "This is Oshii Desu-ne.",
+        "seconds": 3.273,
+        "alt_ok": []
+      },
+      {
+        "id": "14",
+        "subset": "code_switched",
+        "ref": "私は engineer です。",
+        "hyp": "私はエンジニアです。",
+        "seconds": 3.26,
+        "alt_ok": [
+          "エンジニア for engineer"
+        ]
+      },
+      {
+        "id": "15",
+        "subset": "code_switched",
+        "ref": "あの、check please、お願いします。",
+        "hyp": "アンノ チェック プリーズ オネガザイマース",
+        "seconds": 5.197,
+        "alt_ok": [
+          "チェック for check"
+        ]
+      },
+      {
+        "id": "16",
+        "subset": "code_switched",
+        "ref": "東京 station までいくらですか。",
+        "hyp": "TOKYO STATION MADE IKURU DESUKA",
+        "seconds": 4.112,
+        "alt_ok": [
+          "ステーション for station",
+          "駅 for station"
+        ]
+      },
+      {
+        "id": "17",
+        "subset": "code_switched",
+        "ref": "ごめんなさい、I don't understand、もう一度お願いします。",
+        "hyp": "ごめんなさい I don't understand もう一度おはようございます",
+        "seconds": 4.581,
+        "alt_ok": []
+      },
+      {
+        "id": "18",
+        "subset": "code_switched",
+        "ref": "Can I pay with カード ですか。",
+        "hyp": "カードレスカーで負けますか?",
+        "seconds": 4.008,
+        "alt_ok": []
+      },
+      {
+        "id": "19",
+        "subset": "code_switched",
+        "ref": "えっと、vegetarian の menu ありますか。",
+        "hyp": "ベジタリアンのメニューありますか?",
+        "seconds": 3.822,
+        "alt_ok": [
+          "ベジタリアン for vegetarian",
+          "メニュー for menu"
+        ]
+      },
+      {
+        "id": "20",
+        "subset": "code_switched",
+        "ref": "明日 の morning、七時に来ます。",
+        "hyp": "明日のモーニング7時に来ます",
+        "seconds": 3.562,
+        "alt_ok": [
+          "モーニング for morning",
+          "朝 for morning"
+        ]
+      }
+    ],
+    "scores": {
+      "overall": {
+        "cer": 38.7,
+        "sub": 82,
+        "ins": 21,
+        "del": 22,
+        "ref_chars": 323
+      },
+      "pure_ja": {
+        "cer": 4.27,
+        "sub": 2,
+        "ins": 2,
+        "del": 1,
+        "ref_chars": 117
+      },
+      "code_switched": {
+        "cer": 58.25,
+        "sub": 80,
+        "ins": 19,
+        "del": 21,
+        "ref_chars": 206
+      },
+      "latency_p50": 3.336,
+      "latency_p95": 4.581,
+      "latency_total": 69.1
+    }
+  }
+}

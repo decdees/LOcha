@@ -1,0 +1,142 @@
+[
+  {
+    "id": "01",
+    "subset": "pure_ja",
+    "ref": "はじめまして、よろしくお願いします。",
+    "hyp": "はじめましてよろしくおねがざいます",
+    "seconds": 1.2635040839995781
+  },
+  {
+    "id": "02",
+    "subset": "pure_ja",
+    "ref": "すみません、駅はどこですか。",
+    "hyp": "すみません、液はどこですか?",
+    "seconds": 1.230589916001918
+  },
+  {
+    "id": "03",
+    "subset": "pure_ja",
+    "ref": "これをください。",
+    "hyp": "コーリーをくださえ",
+    "seconds": 1.2464230000005045
+  },
+  {
+    "id": "04",
+    "subset": "pure_ja",
+    "ref": "これはいくらですか。",
+    "hyp": "これはいくらですか?",
+    "seconds": 1.1249050420010462
+  },
+  {
+    "id": "05",
+    "subset": "pure_ja",
+    "ref": "日本語が少しわかります。",
+    "hyp": "日本語がすぐしわかります",
+    "seconds": 1.2401622079996741
+  },
+  {
+    "id": "06",
+    "subset": "pure_ja",
+    "ref": "コーヒーを一つお願いします。",
+    "hyp": "コーヒーをひどつおねんございます。",
+    "seconds": 1.4322808329998225
+  },
+  {
+    "id": "07",
+    "subset": "pure_ja",
+    "ref": "ちょっと待ってください。",
+    "hyp": "ちょっとまってくださえ",
+    "seconds": 1.194335416003014
+  },
+  {
+    "id": "08",
+    "subset": "pure_ja",
+    "ref": "写真を撮ってもいいですか。",
+    "hyp": "シャシンオトテモイディスカ",
+    "seconds": 1.2962688749976223
+  },
+  {
+    "id": "09",
+    "subset": "pure_ja",
+    "ref": "トイレはどこにありますか。",
+    "hyp": "俺はどこにありますか?",
+    "seconds": 1.1558583750011167
+  },
+  {
+    "id": "10",
+    "subset": "pure_ja",
+    "ref": "ありがとうございます、また明日。",
+    "hyp": "ありがとうございます。また明日。",
+    "seconds": 1.0721675840031821
+  },
+  {
+    "id": "11",
+    "subset": "code_switched",
+    "ref": "えーと、how do you say \"receipt\" in Japanese?",
+    "hyp": "Ito, how do you say receipt in Japanese?",
+    "seconds": 1.2288869159965543
+  },
+  {
+    "id": "12",
+    "subset": "code_switched",
+    "ref": "すみません、Wi-Fiのpasswordは何ですか。",
+    "hyp": "すみません。Wi-Fiのパスワードはなんですか。",
+    "seconds": 1.45831379199808
+  },
+  {
+    "id": "13",
+    "subset": "code_switched",
+    "ref": "This is 美味しい ですね。",
+    "hyp": "This is Oshi Desune.",
+    "seconds": 1.1562557910001487
+  },
+  {
+    "id": "14",
+    "subset": "code_switched",
+    "ref": "私は engineer です。",
+    "hyp": "私はエンジニアです。",
+    "seconds": 1.2188623750007537
+  },
+  {
+    "id": "15",
+    "subset": "code_switched",
+    "ref": "あの、check please、お願いします。",
+    "hyp": "あのー、チェック、プリーズ。オネガザイマース。",
+    "seconds": 1.5808136669984378
+  },
+  {
+    "id": "16",
+    "subset": "code_switched",
+    "ref": "東京 station までいくらですか。",
+    "hyp": "東京ステーションメイドイクルーですが?",
+    "seconds": 1.453554666000855
+  },
+  {
+    "id": "17",
+    "subset": "code_switched",
+    "ref": "ごめんなさい、I don't understand、もう一度お願いします。",
+    "hyp": "ごめんなさい。I don't understand。もういちいど。わんがざいます。",
+    "seconds": 1.5515396660011902
+  },
+  {
+    "id": "18",
+    "subset": "code_switched",
+    "ref": "Can I pay with カード ですか。",
+    "hyp": "Can I play with Kado Dersuka?",
+    "seconds": 1.192593042000226
+  },
+  {
+    "id": "19",
+    "subset": "code_switched",
+    "ref": "えっと、vegetarian の menu ありますか。",
+    "hyp": "えっと、ヴェジテリアン、ノーメンニュー、アリマスクか。",
+    "seconds": 1.6752619170001708
+  },
+  {
+    "id": "20",
+    "subset": "code_switched",
+    "ref": "明日 の morning、七時に来ます。",
+    "hyp": "明日のモーニングシッチージに来ます",
+    "seconds": 1.3608566660004726
+  }
+]

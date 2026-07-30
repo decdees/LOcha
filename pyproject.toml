@@ -1,0 +1,65 @@
+[project]
+name = "ocha"
+version = "0.0.0"
+description = "Self-hosted Japanese conversation tutor"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.141.1",
+    "fsrs>=6.3.1",
+    "uvicorn>=0.52.0",
+]
+
+# Phase 0 only. T1.1 adds the application dependencies to this same project --
+# two venvs in one repo is not worth the hour it costs later.
+[dependency-groups]
+bench = [
+  "mlx>=0.20",
+  "mlx-lm>=0.20",
+  "mlx-whisper>=0.4",
+  "jiwer>=3.0",
+  "fugashi>=1.3",
+  "unidic-lite>=1.0.8",
+  "huggingface-hub>=0.26",
+  "parakeet-mlx>=0.5.2",
+]
+dev = [
+    "httpx2>=2.9.1",
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ocha"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# benchmarks/ is Phase 0 output -- finished measurement scripts whose numbers are
+# cited in the reports. Reformatting them risks editing code that produced
+# published figures, for no benefit. Same reasoning as the mypy override below.
+# *.md excluded too: ruff 0.16 formats python blocks inside markdown, and the
+# design docs' illustrative snippets are prose, not source.
+extend-exclude = ["benchmarks", "*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+# benchmarks/ is Phase 0 output: reports and the scripts that produced them.
+# It is deliberately outside the strict-typing surface -- retyping finished
+# measurement scripts buys nothing and risks editing numbers that are cited.
+[[tool.mypy.overrides]]
+module = "benchmarks.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
