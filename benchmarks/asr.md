@@ -53,7 +53,45 @@ TASKS.md's candidate list predates several releases. Checked and, where runnable
 
 That is the same failure as kotoba, and it confirms the §2.1 lesson rather than complicating it: **every Japanese-only model in this bake-off collapses on code-switched input, regardless of how good its Japanese is.** The property that matters for this product is multilinguality, not Japanese specialisation.
 
-**Qwen3-ASR-1.7B is the significant gap.** It claims open-source SOTA for Japanese (independent benchmark: CER 0.140 vs whisper-large-v3-turbo's 0.184 on native media speech) and it is multilingual across 30 languages including Japanese *and* English — so unlike parakeet and kotoba it might survive Stage 1. It also supports streaming, which is directly relevant to the latency problem. It could not be measured here: the generic `transformers` ASR pipeline fails on it (beam-search tensor mismatch, then an embedding-indices dtype error on both MPS and CPU). Its card directs users to the official `qwen-asr` package in a **fresh isolated environment**, which was not created rather than risk the Phase 0 venv. **This is the most valuable untested candidate and should be closed before Phase 2.**
+### T0.8 — Qwen3-ASR-1.7B measured. Disqualified on every axis.
+
+| | pure-JA CER | code-sw CER | weighted | p50 | Stage 1 |
+|---|---|---|---|---|---|
+| whisper-large-v3 (MLX) | **2.56** | **55.34** | **36.87** | **1.25 s** | pass (2/10) |
+| Qwen3-ASR-1.7B *(best config)* | 48.72 | 58.25 | 54.91 | 1.72 s | **fail (3/10)** |
+
+**19× worse on pure Japanese, slightly worse on code-switched, and 38% slower.** It fails the Stage 1 gate at 3/10 unusable (`東京 station までいくらですか` → `東京ステーションメイトイクルデスuka`, `ごめんなさい` → `Governmentなさい`, `Can I pay with カード` → `彼はフェウェドカドゥデシュカ`) and misses the pure-JA guardrail by **+46.2 points** against a +3.0 limit.
+
+**It does not help latency either**, which was the entire reason it was promoted to a task. The streaming lever this candidate was supposed to provide is gone with it.
+
+#### Two findings worth keeping
+
+**1. Auto-detect transcribes this speaker as Hindi, in Devanagari.**
+
+```
+ref              すみません、駅はどこですか。
+auto-detect      सुमिरन सेन एकीवा दोगुं तेसु का
+ref              ありがとうございます、また明日。
+auto-detect      अरिगातोगरिमा माता अशिता
+```
+
+The model's language ID hears Hindi-accented Japanese and concludes Hindi, then transcribes phonetically in Devanagari. This is the L1 interference in the project's domain notes showing up in a place nobody predicted — not in the learner's grammar, but in the ASR's language classifier. Any multilingual ASR used here must have its language **forced**, never auto-detected.
+
+**2. Configuration moved it 33 CER points, and it still lost.**
+
+| config | pure-JA CER |
+|---|---|
+| auto-detect | — (Devanagari, unscoreable) |
+| forced Japanese | 82.05 |
+| forced Japanese + context hint | **48.72** |
+
+Forcing the language alone still produced katakana-rendered Japanese (`スミマセン`, `ハリガト`). A context hint asking for kanji and hiragana recovered much of the orthography. The number reported above is its **best** configuration — it was not disadvantaged by a lazy invocation, which is the same discipline applied to whisper's `forced_decoder_ids`.
+
+Raw outputs: `asr-qwen3asr-t08.json`.
+
+---
+
+**Qwen3-ASR-1.7B was the significant gap.** It claims open-source SOTA for Japanese (independent benchmark: CER 0.140 vs whisper-large-v3-turbo's 0.184 on native media speech) and it is multilingual across 30 languages including Japanese *and* English — so unlike parakeet and kotoba it might survive Stage 1. It also supports streaming, which is directly relevant to the latency problem. It was measured in T0.8 above, in an isolated venv with the official `qwen-asr` package, and **disqualified**. The gap is now closed.
 
 Note the benchmark that motivated this check ranks `whisper-large-v3-turbo` second overall for Japanese — while turbo scored 31.62% here and was disqualified by the guardrail. Not a contradiction: that benchmark uses native conversational media, this corpus is an accented L2 beginner. It is a reminder that published Japanese ASR rankings do not transfer to this speaker, which is the entire reason Phase 0 exists.
 
@@ -108,6 +146,7 @@ Recorded because in each case the first run produced a confident, plausible, wro
 
 ## Limitations, stated plainly
 
+- **2.56 is not a load-bearing figure.** It was measured on **rehearsed read-aloud speech in a quiet room** — the speaker reading a prepared romaji line, one utterance at a time, with retakes allowed. Real conversational input is a different distribution: hesitation, self-correction, mid-sentence restarts, trailing off, false starts, thinking noises. **None of that is tested.** Expect the real-world figure to be materially worse, and do not let 2.56 be quoted as the ASR error rate of the product.
 - **The latency column is not apples-to-apples.** Accuracy was measured for all candidates on one backend (transformers+MPS), which is fair. The winning configuration is on MLX, which has no equivalent for `kotoba-whisper-bilingual-v1.0` — no MLX conversion exists. kotoba on MLX would likely be faster than 1.10 s. This does not change the decision, since large-v3 wins accuracy by 4–7×, but "large-v3 is as fast as kotoba" compares across runtimes.
 - **n = 20, one speaker, one session.** Enough to separate 2.56 from 17.09. **Not** enough to resolve differences of 1–2 CER points, and no basis at all for a confidence interval. Treat the ordering as robust and the exact values as indicative.
 - **The corpus is 50/50 by construction; real usage is not.** Aggregate CER is the least meaningful column. Stage 1 and the per-subset columns carry the decision.

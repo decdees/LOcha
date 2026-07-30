@@ -17,7 +17,11 @@
 
 Ceiling = 103.2 GB/s ÷ bytes-per-token (2.2 GB MoE active, 5.0 GB dense).
 
-**Recommendation: `mlx-community/gemma-4-26b-a4b-it-4bit`.** Nearly 2× the throughput of the dense 9B at realistic context, and §4's memory estimate holds.
+**Throughput winner: `gemma-4-26b-a4b`.** Nearly 2× the dense 9B at realistic context, and §4's memory estimate holds.
+
+> **This is NOT the shipped choice.** `DECISION.md` names **`mlx-community/Qwen3.5-9B-4bit`**. Gemma won on speed and lost on correctness: it produced `今日は何を食べるですか？`, where `です` cannot attach to a plain-form verb (correct: `食べますか` / `食べるんですか`). A tutor teaching a chapter-3 conjugation error to a learner who cannot detect it is worse than a slower tutor that is correct — and the 1.9× was being spent on the wrong bottleneck, since ASR is 5× over budget while the LLM is 1.6×.
+>
+> Gemma stays measured here as the **faster-but-less-accurate** option. Switching back is a config edit (`OCHA_LLM_MODEL`), not a code change.
 
 ---
 

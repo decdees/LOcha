@@ -897,19 +897,19 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "fsrs" },
+    { name = "fugashi" },
+    { name = "mlx" },
+    { name = "mlx-lm" },
+    { name = "unidic-lite" },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 bench = [
-    { name = "fugashi" },
     { name = "huggingface-hub" },
     { name = "jiwer" },
-    { name = "mlx" },
-    { name = "mlx-lm" },
     { name = "mlx-whisper" },
     { name = "parakeet-mlx" },
-    { name = "unidic-lite" },
 ]
 dev = [
     { name = "httpx2" },
@@ -922,19 +922,19 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fsrs", specifier = ">=6.3.1" },
+    { name = "fugashi", specifier = ">=1.5.2" },
+    { name = "mlx", specifier = ">=0.32.0" },
+    { name = "mlx-lm", specifier = ">=0.31.3" },
+    { name = "unidic-lite", specifier = ">=1.0.8" },
     { name = "uvicorn", specifier = ">=0.52.0" },
 ]
 
 [package.metadata.requires-dev]
 bench = [
-    { name = "fugashi", specifier = ">=1.3" },
     { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "jiwer", specifier = ">=3.0" },
-    { name = "mlx", specifier = ">=0.20" },
-    { name = "mlx-lm", specifier = ">=0.20" },
     { name = "mlx-whisper", specifier = ">=0.4" },
     { name = "parakeet-mlx", specifier = ">=0.5.2" },
-    { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
 dev = [
     { name = "httpx2", specifier = ">=2.9.1" },

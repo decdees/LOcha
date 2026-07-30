@@ -1,7 +1,7 @@
 # Phase 0 — Decision
 
 **Date:** 30 July 2026 · base M4, 10-core, 32 GB · measured 103.2 GB/s
-**Status:** Phase 0 complete. T0.1–T0.5 and T0.7 all closed.
+**Status:** Phase 0 complete. T0.1–T0.5 and T0.7 closed. Two follow-up measurements outstanding before G1 is amended — see "PRD G1" below.
 
 ---
 
@@ -10,7 +10,7 @@
 | Layer | Choice | Exact artifact |
 |---|---|---|
 | **ASR** | whisper-large-v3 on MLX | `mlx-community/whisper-large-v3-mlx` |
-| **LLM** | Gemma 4 26B-A4B, 4-bit | `mlx-community/gemma-4-26b-a4b-it-4bit` |
+| **LLM** | Qwen3.5-9B, 4-bit | `mlx-community/Qwen3.5-9B-4bit` |
 
 Both are Apache-2.0 and run entirely locally.
 
@@ -22,6 +22,42 @@ Both are Apache-2.0 and run entirely locally.
 - **LLM:** cap context at **~2k, not 8k**. ARCHITECTURE §4 said 8k; at 8k, TTFT is 32.6 s and decode falls to 14.3 tok/s — slower than the dense model it was chosen over.
 
 `src/ocha/speech/asr.py` takes the model as a **config value**, so swapping it is a config edit, not a code change. No runtime-swappable plugin interface. This decision names a *default*, not a permanent commitment.
+
+---
+
+## LLM choice REVERSED — Gemma 4 26B-A4B → Qwen3.5-9B
+
+An earlier revision of this document named Gemma 4 26B-A4B on throughput (39.4 vs
+20.5 tok/s). That is now overturned. The evidence is a single reply from the T0.5
+generation probe:
+
+> **Gemma 4 produced:** `今日は何を食べるですか？`
+>
+> **Correct forms:** `今日は何を食べますか？` — or, if the nuance is explanatory,
+> `今日は何を食べるんですか？` / `食べるのですか？`
+
+`です` cannot attach to a plain-form verb. This is not a subtle register call that
+needs a native speaker to adjudicate; it is a chapter-3 textbook error. One
+confirmed error of this class in a 20-prompt sample is sufficient evidence for a
+product whose entire purpose is teaching a learner who cannot detect it.
+
+**The speed justification no longer holds.** Gemma's 1.9× throughput was bought to
+meet a G1 that is not achievable anyway, and it was buying it in the wrong place:
+
+| stage | over budget |
+|---|---|
+| ASR | **5.0×** |
+| LLM to first sentence | 1.6× |
+
+Switching to Qwen costs roughly **350 ms** on first-sentence generation. Fixing ASR
+is worth **over a second**. Optimising the LLM was the wrong bottleneck.
+
+Qwen3.5-9B scored **50/50** on the T0.5 probe against Gemma's 49/50 with the
+register line added, and produced no comparable grammatical errors in the sample
+(`何を食べましたか？`, `駅には何を食べに行きますか？`).
+
+Gemma remains benchmarked in `llm.md` as the faster-but-less-accurate option, and
+the model is a config value (`OCHA_LLM_MODEL`), so reverting is a config edit.
 
 ---
 
@@ -114,7 +150,46 @@ The 2530 ms figure sums stages measured *in isolation*. The real pipeline overla
 
 **This is an architectural conflict, not an optimisation backlog: G1 (1200 ms) and §2.2 (deterministic accent-correct TTS) cannot both hold on a base M4.**
 
-### Recommendation: amend G1 to ~1.8 s p50 / 2.5 s p95
+### G1 is NOT being amended yet — two measurements are outstanding
+
+Replacing 1200 ms with 1800 ms would swap one invented number for another. The
+1200 ms in PRD G1 came from a latency budget written before anything was measured
+and with no grounding in learner perception; a new p50 picked to fit today's
+figures would have the same defect.
+
+Two measurements bear directly on the number and are not yet in:
+
+**(a) Qwen3-ASR-1.7B — T0.8. DONE, and it changes the picture.** Measured
+pure-JA CER **48.72 against large-v3's 2.56** (19× worse), weighted 54.91 vs
+36.87, and **p50 1.72 s vs 1.25 s — slower**. It fails Stage 1 at 3/10 and misses
+the guardrail by +46.2 points. Its best configuration was used, not a lazy one.
+
+Consequence: **the streaming lever is gone.** Qwen3-ASR was promoted to a task
+specifically because it streams natively; a disqualified model cannot supply that.
+Streaming must now come from chunking whisper-large-v3 itself, which is
+unmeasured work rather than an off-the-shelf capability. The ASR floor stays at
+**1.25 s** until someone builds and measures it.
+
+Also recorded, because it was not predictable: Qwen3-ASR's **auto-detect
+transcribed this speaker as Hindi, in Devanagari** (`ありがとうございます、また明日`
+→ `अरिगातोगरिमा माता अशिता`). Hindi-accented Japanese trips its language
+classifier. Any multilingual ASR here must have its language forced.
+
+**(b) T0.7 re-run after a cold boot — T0.9. STILL OUTSTANDING — needs a reboot, which is a human action.** The 2.52 s figure was taken on a
+machine carrying ~525 MB of accumulated swap from hours of prior benchmarking.
+That is the number a G1 amendment would rest on, and it is not a clean baseline.
+
+### When G1 is amended, it becomes TWO criteria, not one number
+
+The single p50 conflates two different questions. Restructured:
+
+1. **No dead air exceeding ~500 ms without visible or audible feedback** — transcript
+   appearing, a listening state, a thinking state. This is what determines whether
+   the app *feels* broken, and it is achievable at 2.5 s total. It makes the
+   feedback states load-bearing rather than polish, hence T2.8.
+2. **A total p50 ceiling**, set once (a) lands and grounded in measurement.
+
+### Options considered, for the record
 
 This is now an evidenced position rather than a deferral. Options:
 

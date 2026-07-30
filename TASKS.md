@@ -72,6 +72,17 @@ Reference documents in this repo:
 - **Why:** §5's latency budget and §4's memory budget both assume all three resident at once on one memory bus on a base M4. Measuring each alone cannot detect the interaction. This is the untested architectural risk.
 - **Acceptance:** `benchmarks/contention.md` with per-stage wall clock, the **contention delta** against the standalone T0.3/T0.4 numbers, peak summed RSS vs §4's budget, and `vm_stat` swapins/swapouts across the run.
 
+### T0.8 — Qwen3-ASR-1.7B ✅ *(promoted from "known gap")*
+- [x] `Qwen/Qwen3-ASR-1.7B` (Jan 2026, Apache-2.0) in an **isolated venv** — its card requires the official `qwen-asr` package and the generic `transformers` pipeline fails on it (beam-search tensor mismatch, then an embedding-indices dtype error on MPS *and* CPU).
+- [x] Score against the T0.2 corpus using the same pre-registered Stage 1 / Stage 2 rules.
+- **Why it is now a task, not a gap:** ASR is the dominant latency cost (1250 ms, 5× over budget) and Qwen3-ASR streams natively, which is the top latency lever. **PRD G1 cannot be amended responsibly until this lands.**
+- **Acceptance:** numbers appended to `benchmarks/asr.md`; DECISION.md updated if it wins.
+
+### T0.9 — Cold-boot re-run of T0.7
+- [ ] Reboot, then re-run `benchmarks/contention.py` before anything else loads.
+- **Why:** the 2.52 s figure was taken with ~525 MB of accumulated swap after hours of benchmarking. That number is what a G1 amendment would rest on, so it needs a clean baseline.
+- **Acceptance:** `contention.md` records both figures; the delta between them is the measurement error the earlier run carried.
+
 ### T0.6 — Phase 0 report
 - [x] Consolidate into `benchmarks/DECISION.md`: chosen ASR, chosen LLM, and any `ARCHITECTURE.md` revisions required.
 - [x] State plainly in the body, not a footnote: `ARCHITECTURE.md` §2.1's justification for a Japanese-specialised ASR over a generalist audio LLM was **never tested**, because Gemma 4 E4B audio was excluded from T0.3. Open assumption, not a validated finding.
@@ -110,37 +121,42 @@ Reference documents in this repo:
 - [x] Pydantic loader, fail-fast, reports **every** malformed entry rather than just the first. `extra="forbid"` so a typo'd key is an error, not a silent drop.
 - **Acceptance:** 20 valid entries load; malformed entries rejected. ✅ **45 tests green.**
 
-### T1.5 — Grammar firewall *(critical path)*
-- [ ] Detect the literal `[GRAMMAR_QUERY]` sentinel in model output. **Assert it is the ENTIRE payload, not merely present** — T0.5 observed the sentinel emitted alongside 399 chars of grammar explanation when thinking was enabled; a substring test would have passed that and leaked it.
-- [ ] On detection, suppress the model's response entirely and serve from `grammar.json`.
-- [ ] On reference miss: return "not yet documented", log to `unauthored_grammar` table. **Never** fall back to generation.
-- **Acceptance:** a test asserts that when the sentinel fires, no model-generated text reaches the response payload. This test must never be weakened.
+### T1.5 — Grammar firewall ✅ *(critical path)*
+- [x] Detect the literal `[GRAMMAR_QUERY]` sentinel in model output. **Assert it is the ENTIRE payload, not merely present** — T0.5 observed the sentinel emitted alongside 399 chars of grammar explanation when thinking was enabled; a substring test would have passed that and leaked it.
+- [x] On detection, suppress the model's response entirely and serve from `grammar.json`. Verbatim — a test asserts every field is byte-identical to the curated entry.
+- [x] On reference miss: return "not yet documented", log to `unauthored_grammar`. **Never** falls back to generation. Entry resolution is a deterministic trigger table — using the LLM to resolve would put it back in the correctness path.
+- **Acceptance:** a test asserts that when the sentinel fires, no model-generated text reaches the response payload. This test must never be weakened. ✅ **Formulated as derivability — every user-visible field byte-identical to the reference — not a phrase blacklist. 72 tests green.**
 
-### T1.6 — Context Builder
-- [ ] Assemble the system prompt from `known_items`, `due_items`, `lowest_stability`, and the last N turns.
-- [ ] Enforce reply length via prompt *and* `max_tokens`.
-- [ ] **Include the REGISTER line** (ARCHITECTURE §7.1). T0.5: without it Gemma mixed polite/plain on 6/15 turns; with it, 14/15.
-- **Acceptance:** snapshot tests of generated prompts for three different FSRS states.
+### T1.6 — Context Builder ✅
+- [x] Assembles the system prompt from `known_items`, `due_items`, `lowest_stability`; history is carried on `TurnContext` for T1.8.
+- [x] Reply length enforced by prompt *and* `MAX_REPLY_TOKENS`.
+- [x] **REGISTER line included** — T0.5 measured it worth 9/15 → 14/15.
+- [x] **§7.1's template corrected, not copied.** As written it was self-contradictory against real FSRS state: "use only words from KNOWN" while `TARGET` listed due items, which are typically *not* known. `TARGET` is now split into PRACTISE (known, weak) and INTRODUCE (not known, at most one per reply), which encodes FR-3 explicitly.
+- [x] Context cap 2048, not 8k — T0.4 measured TTFT 32.6 s and decode 14.3 tok/s at 8k.
+- **Acceptance:** snapshot tests over three FSRS states (cold start, some known, some weak). ✅ **83 tests green.**
 
-### T1.7 — LLM service
-- [ ] MLX-backed local inference, model from `benchmarks/DECISION.md`.
-- [ ] Loaded once at startup, kept warm. Streaming interface (unused in Phase 1, required in Phase 2).
-- [ ] **`enable_thinking=False`** — hard requirement, see ARCHITECTURE §7.1. Both candidates are reasoning models and leak explanations past the firewall otherwise.
-- [ ] **KV-cache reuse across turns** (`make_prompt_cache`), held in the service and invalidated when the prefix changes. T0.4: without it TTFT p50 is 1.81 s and grows every turn; with it, 0.50 s flat.
-- [ ] Fails loudly at startup if the model is unavailable. No silent cloud fallback — there is no cloud fallback.
-- **Acceptance:** `/health` reports model loaded and resident memory.
+### T1.7 — LLM service ✅
+- [x] MLX-backed local inference, `mlx-community/gemma-4-26b-a4b-it-4bit` per `benchmarks/DECISION.md`, as a **config value** (`OCHA_LLM_MODEL`).
+- [x] Loaded once in the FastAPI lifespan, kept warm. Streaming interface present for Phase 2's sentence chunker.
+- [x] **`enable_thinking=False`.**
+- [x] **KV-cache reuse across turns**, keyed on a hash of the system prompt and rebuilt when it changes — reusing a cache built on a different prefix would silently feed the model the wrong context.
+- [x] Fails loudly if the model is unavailable; `generate()` before `load()` raises rather than lazy-loading.
+- **Acceptance:** `/health` reports model loaded and resident memory. ✅ **`model_loaded: true`, `resident_memory_gb: 14.2`** — matching T0.4. End-to-end smoke: cold load 8.9 s, then 2.65 → 1.08 → 0.97 s per turn as the cache warms; a grammar question produced a clean bare sentinel and the firewall served `particle_wa_ga`. **96 tests green.**
 
-### T1.8 — Turn orchestration
-- [ ] `POST /turn` — accepts text, returns tutor reply, target items, and derived FSRS updates.
-- [ ] Detects whether target items were used, hinted, or avoided; applies ratings.
-- **Acceptance:** integration test drives a 10-turn conversation and asserts FSRS state evolves correctly.
+### T1.8 — Turn orchestration ✅
+- [x] `POST /turn` — accepts text, returns tutor reply (or firewalled grammar answer), targets, derived ratings and usage.
+- [x] Usage detection via `fugashi` lemmas, not substring matching — 食べる appears as 食べます/食べました/食べて. Handles unidic's orthography drift (ご飯→御飯), loanword lemma suffixes (コーヒー-coffee), and multi-token items (お茶 = 接頭辞+名詞).
+- [x] **FR-8's "avoided" narrowed to *elicited* items.** Read literally it would rate five items `Again` every turn — a 1–2 sentence reply cannot exercise six targets. Avoidance now requires the tutor to have put the item in play.
+- [x] Grammar-query turns are not scored — asking a question is not a production attempt.
+- **Acceptance:** 10-turn integration test asserts FSRS state evolves; plus HTTP-level tests. ✅ **118 tests green. Live: p50 1.14 s over 6 turns, firewall fired on both grammar questions, 0 unauthored misses.**
 
 ### T1.9 — *(deleted)* Minimal PWA
 Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice-first, as T2.7. See PRD §10.
 
-### T1.10 — No-network test
-- [ ] Test that fails if any code path opens a socket to a non-Tailscale address.
-- **Acceptance:** test passes; deliberately adding an `httpx.get("https://example.com")` makes it fail.
+### T1.10 — No-network test ✅
+- [x] `src/ocha/net_guard.py` intercepts `socket.connect`/`connect_ex` and refuses anything outside loopback and the Tailscale CGNAT range (100.64.0.0/10).
+- [x] The guard is itself proven: a deliberate outbound connection raises `OutboundNetworkError`, and a test asserts the patch is removed afterwards so it cannot silently disable later tests.
+- **Acceptance:** a full `/turn`, a `/health`, and a firewalled grammar turn all complete with zero outbound connections. ✅ **125 tests green.**
 
 > **GATE.** T1.8's 10-turn integration test passes and T1.10 (no-network) passes. Proceed directly to Phase 2 — this is not a go/no-go, and Phase 1 is not a stopping point. See PRD §10.
 
@@ -162,6 +178,16 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice
 - [ ] Installable to iOS home screen; reachable over Tailscale.
 - [ ] Pitch-accent visualisation is a Phase 3 slot — leave the panel space, ship nothing in it.
 - **Acceptance:** the user completes a 10-turn *spoken* exchange from an iPhone.
+
+### T2.8 — Conversational feedback states *(load-bearing, not polish)*
+- [ ] Transcript appears as ASR resolves; a visible listening state; a visible thinking state.
+- **Why this is not polish:** the restructured G1 makes "no dead air beyond ~500 ms without visible or audible feedback" a first-class criterion. At a measured 2.5 s voice-to-first-audio, feedback is what decides whether the app feels broken or merely deliberate. A silent 2.5 s gap reads as a crash; a 2.5 s gap with a live transcript reads as listening.
+- **Acceptance:** no state in a real turn leaves the user without feedback for more than 500 ms.
+
+### T2.9 — NFR-6 thermal soak
+- [ ] 30-minute sustained session; assert p50 latency degrades by less than 20%.
+- **Why here and not Phase 0:** a sustained-session test only means anything once there is a session to sustain. Every Phase 0 figure came from short bursts.
+- **Acceptance:** a written result in `benchmarks/thermals.md`.
 
 > **The single biggest failure mode:** breaking the streaming chain with a buffering `FrameProcessor` or a non-streaming HTTP TTS call. Every service downstream of the LLM must consume `TextFrame` as it arrives. Audit this before optimising anything else.
 

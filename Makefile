@@ -7,6 +7,12 @@ dev:
 test:
 	uv run pytest
 
+# Loads the real model (~5 GB) and needs VOICEVOX for the full chain. Not in
+# `check` because it takes minutes; run it before shipping anything that touches
+# the LLM service, the transport, or threading.
+test-slow:
+	uv run pytest -m slow -v
+
 lint:
 	uv run ruff check .
 	uv run ruff format --check .

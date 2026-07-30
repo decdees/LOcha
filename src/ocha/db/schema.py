@@ -9,11 +9,12 @@ downgrades: swap this for Alembic, keeping the same file order.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
 MIGRATIONS = Path(__file__).parent / "migrations"
-DEFAULT_DB = Path("data/ocha.db")
+DEFAULT_DB = Path(os.environ.get("OCHA_DB", "data/ocha.db"))
 
 
 def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
@@ -21,7 +22,13 @@ def connect(path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
     p = Path(path)
     if p.parent != Path():
         p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(p, isolation_level=None)  # explicit transactions
+    # check_same_thread=False because FastAPI runs sync endpoints in a threadpool,
+    # so the connection opened during lifespan startup is used from worker threads.
+    # sqlite3 refuses that by default. Safe here only because writes are serialised
+    # by a lock in the API layer -- one user, so contention is nil.
+    conn = sqlite3.connect(
+        p, isolation_level=None, check_same_thread=False
+    )  # explicit transactions
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")  # off by default in sqlite3

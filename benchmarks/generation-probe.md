@@ -52,7 +52,15 @@ Qwen3.5-9B's replies over the same turns did not show this (`何を食べまし�
 
 This is exactly the failure mode the product cannot afford: a tutor teaching a beginner a wrong conjugation, where the learner is by definition unable to catch it. The grammar firewall does **not** protect against it — FR-5 covers *explanations*, and this is *production*.
 
-*Confidence note: `食べるですか` is a basic conjugation error and I state it with high confidence, but I am not a Japanese-competent reviewer. It should be verified by one, along with the retained reply samples.*
+**CONFIRMED, and it decided the LLM choice.** `です` cannot attach to a plain-form verb. The correct forms are `今日は何を食べますか？`, or `食べるんですか？` / `食べるのですか？` if the nuance is explanatory. This is a chapter-3 textbook error, not a subtle register call, so it needed no native reviewer to adjudicate — and one confirmed error of this class in a 20-prompt sample is sufficient evidence for a product whose whole purpose is teaching a learner who cannot detect it.
+
+`DECISION.md` now names **Qwen3.5-9B**, which produced no comparable error in the same sample.
+
+### The finding is that a mechanical checker passed it
+
+This reply scored **PASS on register**. The checker sees a sentence ending in `ですか`, correctly classifies it as polite, and has no way to see that the verb form preceding it is wrong. That is not a bug in the checker — it is the boundary of what mechanical constraint-checking can do, made concrete.
+
+The four checks verify *compliance*, and compliance is not correctness. Anything relying on this probe as evidence of Japanese quality must carry that caveat: a 50/50 score means the model followed instructions, not that it wrote good Japanese.
 
 ---
 
