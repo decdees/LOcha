@@ -127,5 +127,7 @@ def _client_message(frame: Frame) -> dict[str, Any] | None:
     if isinstance(frame, TranscriptionFrame):
         return {"type": "transcript", "text": frame.text, "final": True}
     if isinstance(frame, LLMTextFrame):
-        return {"type": "reply", "text": frame.text}
+        # Generation ends with an empty chunk; forwarding it sends the client a
+        # `reply` with nothing in it, which is a no-op it has to know to ignore.
+        return {"type": "reply", "text": frame.text} if frame.text else None
     return None

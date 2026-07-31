@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import logging
 import os
+import pathlib
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ocha.db import connect, migrate
@@ -30,6 +32,8 @@ from ocha.tutor.turn import run_turn
 # and for the test suite, which cannot hold a 14.2 GB model. /health reports
 # loaded=false, so a skipped load is never mistaken for a working one.
 SKIP_MODEL = os.environ.get("OCHA_SKIP_MODEL") == "1"
+
+WEB_DIR = pathlib.Path(__file__).resolve().parents[3] / "web"
 
 # One shared connection, one writer.
 #
@@ -207,3 +211,9 @@ def health() -> Health:
         resident_memory_gb=st.resident_gb,
         grammar_entries=len(app.state.grammar),
     )
+
+
+# LAST, after every route. A mount at "/" matches everything, and Starlette checks
+# routes in registration order -- mounted earlier it silently shadows /health and
+# /turn. `html=True` serves web/index.html at "/".
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

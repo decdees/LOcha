@@ -43,3 +43,18 @@ def test_grammar_reference_is_loaded_at_startup(client: TestClient) -> None:
     """Fail-fast: a malformed reference means the firewall has nothing to serve."""
     assert app.state.grammar is not None
     assert len(app.state.grammar) == 20
+
+
+def test_the_client_is_served_from_the_same_origin(client: TestClient) -> None:
+    """The client resolves its WebSocket URL from `location.host`.
+
+    Served from anywhere else it would have to be told where the API is, and the
+    phone would need two hostnames instead of one. The mount is registered last on
+    purpose: a mount at "/" matches everything, and Starlette checks routes in
+    registration order, so mounted earlier it silently shadows /health and /turn.
+    """
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "AudioWorklet" in page.text, "the served page is not the voice client"
+    # The routes the mount would have swallowed.
+    assert client.get("/health").status_code == 200

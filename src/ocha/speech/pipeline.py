@@ -213,6 +213,12 @@ async def run_session(
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(audio_in_sample_rate=SAMPLE_RATE, audio_out_sample_rate=SAMPLE_RATE),
+        # RTVI is Pipecat's own client protocol, on by default. We do not speak it
+        # -- the client reads `speech/wire.py`'s handful of message types -- and
+        # left on it puts ~15 extra JSON messages per turn on the socket
+        # (bot-llm-started, bot-transcription, bot-tts-stopped...). Observed in a
+        # browser, where they arrived alongside ours and were silently ignored.
+        enable_rtvi=False,
     )
     # handle_sigint=False: uvicorn owns the signal handlers. A runner that installs
     # its own turns Ctrl-C into a hung server.

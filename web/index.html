@@ -199,6 +199,22 @@ function play(buf) {
 
 async function start() {
   micBtn.disabled = true;
+  try {
+    await connect();
+  } catch (err) {
+    // A denied microphone is the most likely first-run failure, and leaving the
+    // button dead with no explanation is the worst way to report it.
+    const el = turn('grammar', 'cannot start');
+    el.querySelector('.jp').textContent =
+      err.name === 'NotAllowedError'
+        ? 'Microphone permission was denied. Allow it for this site and press Start again.'
+        : `${err.name}: ${err.message}`;
+    micBtn.disabled = false;
+    setState('idle');
+  }
+}
+
+async function connect() {
   stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, sampleRate: RATE, echoCancellation: true,
              noiseSuppression: true, autoGainControl: true },

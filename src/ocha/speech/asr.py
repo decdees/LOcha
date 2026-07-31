@@ -76,6 +76,20 @@ MIN_SEGMENT_S = 0.3
 # end-to-end run, each time on a segment that was mostly silence. Transcripts
 # matching these are dropped: an invented utterance costs a whole turn and teaches
 # the learner that the tutor mishears them.
+# A transcript whose text is one short span repeated over and over is the decoder
+# looping, not the learner. T0.3 saw it on transformers (557 insertions, 70 s for
+# one 4.9 s clip) and fixed it with `no_repeat_ngram_size=4`, which does not exist
+# on MLX; an end-to-end run then produced `火が火に火に火に…` here with MLX's own
+# guards active. So the check is post-hoc, on the text.
+#
+# The threshold has to tolerate real Japanese, which repeats short spans
+# legitimately -- 「だんだん」, 「いろいろ」, 「はいはい」 -- so it triggers only when a
+# 2-4 character span accounts for most of a transcript long enough that the
+# repetition cannot be a word.
+LOOP_MIN_CHARS = 12
+LOOP_MIN_REPEATS = 4
+LOOP_COVERAGE = 0.7
+
 HALLUCINATIONS = (
     "ご視聴ありがとうございました",
     "ご視聴ありがとうございます",
@@ -134,7 +148,7 @@ class OchaWhisper(SegmentedSTTService):
         # int16 -> float32 in [-1, 1). Dividing by 32768 rather than 32767 keeps
         # the mapping exact in binary and matches what whisper's own loader does.
         text = await self._transcribe(samples)
-        if any(h in text for h in HALLUCINATIONS):
+        if any(h in text for h in HALLUCINATIONS) or is_looping(text):
             yield None
             return
         if not text:
@@ -160,3 +174,24 @@ class OchaWhisper(SegmentedSTTService):
                 "(constraint 6); running inline would work until it did not."
             )
         return str(await self._worker.call(work))
+
+
+def is_looping(text: str) -> bool:
+    """True when the transcript is one short span repeated, i.e. a decoder loop.
+
+    Deliberately conservative: a false positive silently drops a real utterance,
+    which costs a turn, while a false negative produces a visibly absurd reply the
+    learner will ignore. Better to let one through than to eat someone's sentence.
+    """
+    stripped = text.strip()
+    if len(stripped) < LOOP_MIN_CHARS:
+        return False
+    for span in range(2, 5):
+        for start in range(span):
+            unit = stripped[start : start + span]
+            if not unit.strip():
+                continue
+            repeats = stripped.count(unit)
+            if repeats >= LOOP_MIN_REPEATS and repeats * span / len(stripped) >= LOOP_COVERAGE:
+                return True
+    return False
