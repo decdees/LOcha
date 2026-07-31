@@ -6,9 +6,9 @@ invisible until a real transport was in front of the code -- is exactly the clas
 of bug a WebSocket pipeline invites, so the round trip is asserted through
 Starlette rather than through `OchaSerializer` alone.
 
-The pipeline is a loopback today (see `speech/pipeline.py`), so audio in must
-come back out. When T2.2--T2.5 replace the loopback, this file's audio assertion
-is expected to change; the connect-and-survive assertion is not.
+`?loopback=1` selects the diagnostic echo pipeline -- no VAD, no models -- so
+audio in must come back out byte for byte. The real pipeline is covered by
+`test_ws_pipeline.py`, which injects stub ASR and TTS.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def test_pcm_survives_the_round_trip(client: TestClient) -> None:
     re-chunked the audio would still *sound* roughly right on the phone while
     quietly changing what whisper receives in T2.3.
     """
-    with client.websocket_connect("/ws") as ws:
+    with client.websocket_connect("/ws?loopback=1") as ws:
         for _ in range(10):
             ws.send_bytes(CHUNK)
         out = b""

@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -39,6 +40,11 @@ from pipecat.tests.utils import run_test
 
 from ocha.speech.probe import TurnStateProbe
 from ocha.turnstate import TurnState
+
+
+def audio_frame() -> TTSAudioRawFrame:
+    """10 ms of silence. Stands in for real synthesis output."""
+    return TTSAudioRawFrame(audio=b"\x00\x00" * 160, sample_rate=16_000, num_channels=1)
 
 
 class Clock:
@@ -170,11 +176,19 @@ async def test_repeated_non_interim_states_are_not_duplicated() -> None:
 
 
 async def test_spans_measure_the_stages_5_1_budgets() -> None:
-    """Timings are T0.9's measured values: ASR 1.25 s, LLM TTFT 0.50 s, TTS 0.63 s."""
+    """Timings are T0.9's measured values: ASR 1.25 s, LLM TTFT 0.50 s, TTS 0.63 s.
+
+    First audio is an *audio* frame. This test used to send `TTSStartedFrame` and
+    was right about the arithmetic and wrong about the definition: that frame is
+    emitted before synthesis begins, so counting it measured 15 ms against
+    VOICEVOX's real 0.69 s and under-reported G1b by half a second (T2.6,
+    `benchmarks/voice-loop.md`). Corrected, not loosened -- the assertions are
+    unchanged and still exact.
+    """
     clock = Clock()
     probe = TickingProbe(
         clock,
-        {TranscriptionFrame: 1.25, LLMTextFrame: 0.50, TTSStartedFrame: 0.63},
+        {TranscriptionFrame: 1.25, LLMTextFrame: 0.50, TTSAudioRawFrame: 0.63},
     )
     await run_test(
         probe,
@@ -182,13 +196,13 @@ async def test_spans_measure_the_stages_5_1_budgets() -> None:
             UserStoppedSpeakingFrame(),
             transcription("こんにちは。"),
             LLMTextFrame(text="い"),
-            TTSStartedFrame(),
+            audio_frame(),
         ],
         expected_down_frames=[
             UserStoppedSpeakingFrame,
             TranscriptionFrame,
             LLMTextFrame,
-            TTSStartedFrame,
+            TTSAudioRawFrame,
         ],
     )
     r = probe.report()
@@ -199,13 +213,12 @@ async def test_spans_measure_the_stages_5_1_budgets() -> None:
 
 
 async def test_first_occurrence_wins_for_a_repeated_mark() -> None:
-    """TTS emits a started frame per sentence; first audio is the first of them.
-    Uses two CONTROL frames so queue ordering is well-defined."""
+    """TTS emits many audio frames per sentence; first audio is the first of them."""
     clock = Clock()
-    probe = TickingProbe(clock, {TTSStartedFrame: 1.0})
+    probe = TickingProbe(clock, {TTSAudioRawFrame: 1.0})
     await run_test(
         probe,
-        frames_to_send=[UserStoppedSpeakingFrame(), TTSStartedFrame(), TTSStartedFrame()],
+        frames_to_send=[UserStoppedSpeakingFrame(), audio_frame(), audio_frame()],
     )
     # two ticks of 1.0 elapsed, but the mark is taken at the first
     assert probe.report()["voice_to_first_audio_s"] == pytest.approx(1.0)
@@ -228,15 +241,15 @@ async def test_measured_latency_without_interim_transcripts_violates_g1a() -> No
     """Why T2.8's feedback states are load-bearing. At the measured 1.25 s ASR
     stage with no interim transcripts, the user sees nothing at all."""
     clock = Clock()
-    probe = TickingProbe(clock, {TranscriptionFrame: 1.25, TTSStartedFrame: 0.50})
+    probe = TickingProbe(clock, {TranscriptionFrame: 1.25, TTSAudioRawFrame: 0.50})
     await run_test(
         probe,
         frames_to_send=[
             UserStoppedSpeakingFrame(),
             transcription("こんにちは。"),
-            TTSStartedFrame(),
+            audio_frame(),
         ],
-        expected_down_frames=[UserStoppedSpeakingFrame, TranscriptionFrame, TTSStartedFrame],
+        expected_down_frames=[UserStoppedSpeakingFrame, TranscriptionFrame, TTSAudioRawFrame],
     )
     assert probe.report()["satisfies_g1a"] is False
 
@@ -254,7 +267,7 @@ async def test_interim_transcripts_rescue_g1a_at_the_same_total_latency() -> Non
     frames += [interim("こん") for _ in range(5)]
     frames += [transcription("こんにちは。")]
     frames += [LLMFullResponseStartFrame() for _ in range(2)]
-    frames += [TTSStartedFrame()]
+    frames += [audio_frame()]
 
     await run_test(probe, frames_to_send=frames, expected_down_frames=[type(f) for f in frames])
 

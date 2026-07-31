@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from ocha.db import connect, migrate
 from ocha.db.seed import seed
 from ocha.scheduling import ItemScheduler
+from ocha.speech.wire import SAMPLE_RATE
 from ocha.tutor.llm import LlmService, MlxLlm
 from ocha.tutor.turn import run_turn
 
@@ -98,6 +99,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not SKIP_MODEL:
         # Raises if unavailable. There is no cloud fallback to fall back to.
         llm.load()  # type: ignore[attr-defined]
+        # Warm whisper on this same thread, for the same reason and by the same
+        # rule: MLX streams belong to the thread that loaded the model, and both
+        # models are used from the event loop. A cold whisper load inside the
+        # first turn is a correctness bug, not a slow path (constraint 3).
+        from ocha.speech.asr import OchaWhisper
+
+        asr = OchaWhisper(sample_rate=SAMPLE_RATE)
+        asr.warm()
+        app.state.asr = asr
     app.state.llm = llm
     yield
 
@@ -144,17 +154,31 @@ async def turn(req: TurnRequest) -> TurnResponse:
 
 
 @app.websocket("/ws")
-async def ws(websocket: WebSocket) -> None:
-    """The voice loop (T2.1). One client, one connection, its whole life.
+async def ws(websocket: WebSocket, loopback: bool = False) -> None:
+    """The voice loop (T2.1-T2.5). One client, one connection, its whole life.
 
-    `async def` for the same reason /turn is: the pipeline will run MLX inference
+    `async def` for the same reason /turn is: the pipeline runs MLX inference
     (whisper, then the LLM) and MLX GPU streams are thread-local to whichever
     thread ran `load()`. Standing constraint 6.
+
+    `?loopback=1` runs the diagnostic echo pipeline instead -- no VAD, no models.
+    That is the by-ear audio check for HFP headset capture (ARCHITECTURE risk 4).
     """
     await websocket.accept()
     from ocha.speech.pipeline import run_session
 
-    probe = await run_session(websocket)
+    probe = await run_session(
+        websocket,
+        app.state.conn,
+        app.state.scheduler,
+        app.state.grammar,
+        app.state.llm,
+        loopback=loopback,
+        # The warmed instance, not a fresh one -- a second OchaWhisper would pay
+        # the load cost again inside the first turn.
+        asr=getattr(app.state, "asr", None),
+        tts=getattr(app.state, "tts", None),
+    )
     logging.getLogger(__name__).info("ws session ended: %s", probe.report())
 
 

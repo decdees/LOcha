@@ -67,7 +67,21 @@ def run_turn(
     *,
     session_id: int | None = None,
     timeline: TurnTimeline | None = None,
+    raw: str | None = None,
 ) -> TurnResult:
+    """One turn: context, generation, firewall, scoring, persistence.
+
+    `raw` exists for the voice loop (T2.4). There, the reply has already been
+    generated -- streamed sentence by sentence so synthesis can start on the first
+    one -- and generating again here would double the latency and produce a
+    *different* reply from the one the user heard. Passing it in reuses the
+    firewall, scoring and persistence rather than reimplementing all three
+    alongside the pipeline.
+
+    It buys no way around the firewall: `apply_firewall` runs on `raw` exactly as
+    it runs on a locally generated reply, and the pipeline withholds every token
+    from the client until this call returns.
+    """
     tl = timeline if timeline is not None else TurnTimeline()
 
     session = ensure_session(conn, session_id)
@@ -78,7 +92,8 @@ def run_turn(
     # T2.2/T2.3; from here the states are the same.
     tl.emit(TurnState.THINKING, "building context")
     ctx = build_context(scheduler)
-    raw = llm.generate(ctx.system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS)
+    if raw is None:
+        raw = llm.generate(ctx.system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS)
     outcome = apply_firewall(raw, user_text, reference, conn)
     tl.emit(
         TurnState.GRAMMAR if outcome.fired else TurnState.SPEAKING,

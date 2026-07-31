@@ -71,3 +71,24 @@ def test_grammar_turn_makes_no_outbound_connection(client: TestClient) -> None:
         r = client.post("/turn", json={"text": "what is the causative passive"})
     assert r.status_code == 200
     assert r.json()["grammar"]["kind"] == "not_documented"
+
+
+def test_importing_the_voice_pipeline_makes_no_outbound_connection() -> None:
+    """NFR-3 covers imports, not only request paths.
+
+    Pipecat's sentence-boundary utility is built on NLTK, and
+    `pipecat.utils.string` calls `nltk.download("punkt_tab")` at module scope when
+    the tokenizer data is missing. That is an outbound call to a public host in an
+    import that the TTS service pulls in -- it happens to be silent on this machine
+    because the data is already cached under ~/nltk_data, which is precisely why it
+    needs a test: a fresh checkout would reach the network before serving a single
+    turn, and nothing would report it.
+
+    Failure here means vendoring the punkt_tab data (or setting NLTK_DATA to a
+    checked-in copy), not relaxing the guard.
+    """
+    import importlib
+
+    with no_outbound_network():
+        for module in ("ocha.speech.wire", "ocha.speech.tts", "ocha.speech.pipeline"):
+            importlib.reload(importlib.import_module(module))

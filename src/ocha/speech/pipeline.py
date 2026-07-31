@@ -1,39 +1,60 @@
-"""The voice pipeline (T2.1 scaffold).
+"""The voice pipeline (T2.1--T2.5).
 
-What exists here today is the **loopback**: audio from the client goes through
-the probe and straight back out. That is deliberately not a placeholder chain
-with the real stages stubbed -- it is the day-one audio quality test TASKS.md
-T2.1 asks for, and it answers questions nothing downstream can:
-
-- does 16 kHz PCM survive the round trip over Tailscale intact
-- what does HFP-duplex headset audio actually sound like (ARCHITECTURE risk 4)
-- does the client's capture-and-playback path work at all
-
-T2.2--T2.5 replace the loopback with VAD -> ASR -> LLM -> chunker -> TTS. The
-probe placement and the transport do not change when they do.
+    transport.input() -> VAD -> ASR -> TutorStage -> TTS -> probe -> output()
 
 The probe sits immediately before `transport.output()`, one instance, not two.
 Frames flow downstream through the whole chain, so a single tap at the end sees
 every stage boundary §5.1 budgets, and it is the only position from which it can
 push client state messages that reach the transport without crossing back
 upstream.
+
+**There is no separate sentence chunker (T2.4).** Pipecat's `TTSService`
+aggregates text into sentences before synthesising, and its boundary set already
+includes 。！？. Writing our own splitter to feed it would be a second
+implementation of the same rule, so T2.4 is the `TutorStage` emitting one
+`LLMTextFrame` per sentence plus that default -- configuration, not code.
+
+`build_loopback` is kept: it is the day-one audio test, and the only way to
+answer by ear whether HFP-duplex headset audio is usable (ARCHITECTURE risk 4)
+without ASR in the way. `/ws?loopback=1` selects it.
 """
 
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi import WebSocket
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import WorkerRunner
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.stt_service import SegmentedSTTService
+from pipecat.services.tts_service import TTSService
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
 
-from ocha.speech.probe import TurnStateProbe
+from ocha.scheduling.scheduler import ItemScheduler
+from ocha.speech.asr import OchaWhisper
+from ocha.speech.probe import Spans, TurnStateProbe
+from ocha.speech.tts import VoicevoxTTS
+from ocha.speech.tutor_stage import TutorStage
 from ocha.speech.wire import CHANNELS, SAMPLE_RATE, OchaSerializer
+from ocha.turnstate import TurnTimeline
+from ocha.tutor.grammar import GrammarReference
+from ocha.tutor.llm import LlmService
+
+# stop_secs is the endpoint delay -- how long silence must last before the turn is
+# considered over. ARCHITECTURE §5.1 budgets 150 ms for it and calls the figure
+# unmeasured; 0.2 s is Pipecat's default and closer to what Japanese needs, since
+# a sentence-final です/ます trails off quietly and clipping it costs the transcript
+# its politeness marking. Measured in T2.6, not guessed at twice.
+VAD_PARAMS = VADParams(stop_secs=0.2)
 
 
 def build_transport(websocket: WebSocket) -> FastAPIWebsocketTransport:
@@ -55,12 +76,12 @@ def build_transport(websocket: WebSocket) -> FastAPIWebsocketTransport:
 
 
 class _Loopback(FrameProcessor):
-    """Turns captured audio back into playable audio. Deleted at T2.2.
+    """Turns captured audio back into playable audio. Diagnostic only.
 
     Needed because input and output audio are distinct frame types, and the
-    serializer deliberately only writes `OutputAudioRawFrame` -- once real stages
-    exist, `InputAudioRawFrame` still flows the length of the pipeline, and
-    serializing it too would echo the user's own microphone back at them.
+    serializer deliberately only writes `OutputAudioRawFrame`: `InputAudioRawFrame`
+    flows the length of the real pipeline too, and serializing it as well would
+    echo the user's own microphone back at them.
     """
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -74,19 +95,89 @@ class _Loopback(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-def build_pipeline(transport: FastAPIWebsocketTransport) -> tuple[Pipeline, TurnStateProbe]:
+def build_loopback(transport: FastAPIWebsocketTransport) -> tuple[Pipeline, TurnStateProbe]:
+    """Audio in, same audio out. No VAD, no models. The by-ear audio check."""
     probe = TurnStateProbe(emit_state=True)
     return Pipeline([transport.input(), _Loopback(), probe, transport.output()]), probe
 
 
-async def run_session(websocket: WebSocket) -> TurnStateProbe:
+def build_pipeline(
+    transport: FastAPIWebsocketTransport,
+    conn: sqlite3.Connection,
+    scheduler: ItemScheduler,
+    reference: GrammarReference,
+    llm: LlmService,
+    *,
+    asr: SegmentedSTTService | None = None,
+    tts: TTSService | None = None,
+) -> tuple[Pipeline, TurnStateProbe]:
+    """The real loop. `asr`/`tts` are injectable so tests can run it without MLX.
+
+    **Four probes, one instrument.** They share a `Spans` and a `TurnTimeline`;
+    the returned probe is the tail one, which therefore reports for all three. Each
+    position is there because a stage downstream of it delays the frame the
+    measurement depends on:
+
+    - **after VAD** -- `SegmentedSTTService` forwards `VADUserStoppedSpeakingFrame`
+      only *after* it has transcribed the segment, so any later tap timestamps the
+      end of the utterance at the end of ASR. That makes `asr_s` read ~0 and, worse,
+      drops ASR out of `voice_to_first_audio_s` entirely, under-reporting G1b.
+    - **after ASR** -- `TutorStage` blocks the event loop for the whole generation,
+      so a tail-only tap sees the transcript after the LLM has finished and charges
+      the LLM's time to ASR.
+    - **after the tutor stage** -- `TTSService` consumes `LLMTextFrame` and emits its
+      own text frame only once a sentence has been synthesised, so without this tap
+      VOICEVOX's synthesis time is charged to the LLM and `tts_s` reads ~0.
+    - **at the end** -- where audio actually leaves.
+
+    All three were measured, not reasoned about: see benchmarks/voice-loop.md.
+    """
+    spans = Spans()
+    timeline = TurnTimeline()
+    taps = [TurnStateProbe(timeline=timeline, spans=spans, emit_state=True) for _ in range(4)]
+    after_vad, after_asr, after_tutor, tail = taps
+    return (
+        Pipeline(
+            [
+                transport.input(),
+                VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VAD_PARAMS)),
+                after_vad,
+                asr if asr is not None else OchaWhisper(),
+                after_asr,
+                TutorStage(conn, scheduler, reference, llm),
+                after_tutor,
+                tts if tts is not None else VoicevoxTTS(),
+                tail,
+                transport.output(),
+            ]
+        ),
+        tail,
+    )
+
+
+async def run_session(
+    websocket: WebSocket,
+    conn: sqlite3.Connection,
+    scheduler: ItemScheduler,
+    reference: GrammarReference,
+    llm: LlmService,
+    *,
+    loopback: bool = False,
+    asr: SegmentedSTTService | None = None,
+    tts: TTSService | None = None,
+) -> TurnStateProbe:
     """Serve one client connection for its whole life. Returns the probe.
 
     The probe is returned rather than logged so the caller decides what to do
     with the measurement -- T2.6 writes it to a report, tests assert on it.
     """
     transport = build_transport(websocket)
-    pipeline, probe = build_pipeline(transport)
+    if loopback:
+        pipeline, probe = build_loopback(transport)
+    else:
+        pipeline, probe = build_pipeline(
+            transport, conn, scheduler, reference, llm, asr=asr, tts=tts
+        )
     # PipelineWorker/WorkerRunner, not PipelineTask/PipelineRunner: the latter pair
     # is deprecated as of Pipecat 1.3 and removed at 2.0. Same objects, new names.
     worker = PipelineWorker(

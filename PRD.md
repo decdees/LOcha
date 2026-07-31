@@ -27,8 +27,8 @@ The target learner is an absolute beginner in Japanese, aiming at travel and con
 
 | # | Goal | Measure |
 |---|---|---|
-| G1a | The conversation never *feels* broken | **No dead air exceeding 500 ms without visible or audible feedback** — transcript appearing, listening state, thinking state |
-| G1b | Turn latency stays within a measured bound | **p50 voice-to-first-audio ≤ 3.2 s; p95 ≤ 4.6 s** — a regression bound, held today. Target ≤ 2.2 s after streaming ASR. See §11. |
+| G1a | The conversation never *feels* broken | **No dead air exceeding 500 ms without visible or audible feedback** — transcript appearing, listening state, thinking state. **FAILING as of T2.6, and not for want of latency work.** Segmented whisper produces no interim transcripts, so `transcribing` is on screen unchanged for ~1.0 s and `thinking` for ~1.4 s. Whether a *static* indicator counts as feedback is a wording question this criterion has not answered; three options are set out in `benchmarks/voice-loop.md` and one of them needs deciding. The test is not being loosened to pass. |
+| G1b | Turn latency stays within a measured bound | **p50 voice-to-first-audio ≤ 3.2 s; p95 ≤ 4.6 s** — a regression bound. **NOT HELD as of T2.6: measured 3.73 s p50 through the real pipeline** (`benchmarks/voice-loop.md`). The bound was derived from a benchtop script; the pipeline is ~1.2 s slower because MLX generation blocks the event loop and pushed frames cannot be delivered. Recovery is a dedicated single-threaded inference worker (standing constraint 6's own prescription), not a looser bound. |
 | G2 | Never teach incorrect grammar | 100% of grammar explanations served from curated reference, 0% from model generation |
 | G3 | Measure pitch accent per utterance | Three stable scores per turn: segmental, accent, rhythm. **Deferred post-October 2026 — see §10.** |
 | G4 | Schedule practice from production quality | FSRS rating derived from usage + pronunciation, not self-report |

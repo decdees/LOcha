@@ -203,13 +203,13 @@ Pipecat pipeline ── FastAPIWebsocketTransport
 
 | Stage | Target | Notes |
 |---|---|---|
-| VAD endpoint | 150 ms | Biggest perceived win vs push-to-talk |
+| VAD endpoint | 150 ms → **200 ms configured** | Still unmeasured in isolation. `stop_secs=0.2`, because a sentence-final です/ます trails off quietly and clipping it costs the transcript its politeness marking. |
 | ASR | ~~250 ms~~ **1250 ms** | **T0.3 MEASURED**, large-v3 on MLX. The 250 ms assumed kotoba, which T0.3 disqualified. Choosing kotoba to save 150 ms would cost 6.7x the character errors, and a wrong transcript costs a whole turn. |
 | LLM TTFT | ~~200 ms~~ **500 ms** | **T0.4 MEASURED.** "MoE prefill is cheap" is wrong: prefill runs 160–400 tok/s and is O(context). 500 ms is *with* KV-cache reuse; without it, p50 is 1.81 s and grows every turn. |
 | First sentence generated | ~~250 ms~~ **400 ms** | **T0.4 MEASURED.** ~15 tokens at 37.7 tok/s. (The old row's arithmetic was inconsistent: 15 tokens at 30 tok/s is 500 ms, not 250.) |
-| VOICEVOX synthesis | 200 ms | First sentence only |
+| VOICEVOX synthesis | ~~200 ms~~ **690 ms standalone / 1170–1440 ms in the pipeline** | **T2.6 MEASURED.** The gap between the two is the blocked event loop, not VOICEVOX. |
 | Network (Tailscale, LAN) | 30 ms | WAN adds 50–150 ms |
-| **Voice-to-first-audio** | ~~**~1.1 s**~~ **~2.53 s** | **PRD G1 (p50 < 1200 ms) is at serious risk.** The two measured stages alone (ASR 1250 + LLM 900) consume 2150 ms of a 1200 ms budget. VAD and TTS remain budgeted, not measured; T0.7 measures the real chain. Latency must be recovered by overlapping stages — streaming ASR on partial audio, shorter Context Builder prompts, VOICEVOX synthesis overlapping generation — **not** by degrading the transcript. |
+| **Voice-to-first-audio** | ~~**~1.1 s**~~ ~~**~2.53 s**~~ **3.73 s** | **T2.6 MEASURED THROUGH THE PIPELINE — G1b is missed by ~0.5 s.** 3.73 s p50 over four consecutive turns, against G1b's 3.2 s bound. The 2.53 s figure was a script calling the components in order; the pipeline is ~1.2 s slower, and **not because of model speed**. MLX inference runs on the event-loop thread (constraint 6), so during generation the loop cannot deliver frames that have already been pushed — VOICEVOX finishes synthesising in its thread and the audio then waits. `first text → first audio` measures 1.17–1.44 s against a standalone 0.48–0.58 s. The recovery is constraint 6's own sanctioned shape: a dedicated single-threaded inference worker with a queue. See `benchmarks/voice-loop.md`. |
 
 ### 5.2 The three rules that produce that number
 
