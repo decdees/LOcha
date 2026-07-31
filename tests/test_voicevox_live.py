@@ -24,7 +24,7 @@ async def test_synthesis_returns_bare_pcm_at_the_wire_rate() -> None:
     tts = VoicevoxTTS(sample_rate=SAMPLE_RATE)
     audio = b""
     errors: list[str] = []
-    async for frame in tts.run_tts("そうですね。", "test"):
+    async for frame in tts.speak("そうですね。"):
         if isinstance(frame, TTSAudioRawFrame):
             assert frame.sample_rate == SAMPLE_RATE, "VOICEVOX ignored outputSamplingRate"
             assert frame.num_channels == 1
@@ -44,6 +44,6 @@ async def test_synthesis_returns_bare_pcm_at_the_wire_rate() -> None:
 async def test_a_bad_request_surfaces_the_engine_s_reason() -> None:
     """A bare "HTTP Error 500" is what made the 0 Hz bug look like a network fault."""
     tts = VoicevoxTTS(sample_rate=SAMPLE_RATE, speaker=99999)
-    errors = [f.error async for f in tts.run_tts("テスト。", "t") if isinstance(f, ErrorFrame)]
+    errors = [f.error async for f in tts.speak("テスト。") if isinstance(f, ErrorFrame)]
     assert errors, "an unknown speaker should have failed"
     assert any(len(e) > len("VOICEVOX synthesis failed: HTTP Error 500") for e in errors), errors

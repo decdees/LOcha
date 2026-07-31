@@ -79,3 +79,107 @@ The probe was written before any real stage existed, and four of its assumptions
 | `TTSStartedFrame` marked "first audio" | `tts_s` 15 ms against a real 0.69 s |
 
 The third and fourth **under-reported G1b** — 2.04 s and 3.07 s were both wrong and both plausible. A probe that reports a number is not a probe that reports the right number, and the only thing that distinguished them was running the real chain.
+
+
+---
+
+# T2.6 round 2 — after the inference worker and the filled pauses
+
+**Date:** 31 July 2026, same machine and models. Changes measured: inference on a
+dedicated single-threaded worker (constraint 6's prescribed shape), pre-synthesised
+filled pauses, `VoicevoxTTS` rewritten off Pipecat's `TTSService`, and G1a
+re-specified as time-to-any-audible-or-visible-change.
+
+## Instrument validation (constraint 9)
+
+Stated because the constraint now requires it, and because round 1 shipped two
+plausible-but-wrong numbers.
+
+| check | known answer | instrument |
+|---|---|---|
+| `tts_s` vs VOICEVOX standalone | 0.42–0.58 s for the filler phrases, timed directly over HTTP | 0.65–0.69 s in-pipeline — consistent, the excess is delivery |
+| LLM TTFT | 1.14–1.28 s, measured outside the pipeline, cache reused *and* reset | 1.15 s implied in-pipeline |
+| ASR | 1.25 s p50 standalone (T0.3) | 0.97–1.28 s in-pipeline |
+| G1a arithmetic | hand-computed spans on a fake clock (`tests/test_turnstate.py`) | matches |
+
+Two instrument bugs were found *by* this validation and fixed before any number
+below was recorded — both in the audio-coverage model, see "G1a" below.
+
+## G1b: p50 is still outside the bound, and the ceiling is now visible
+
+| stage | measured | note |
+|---|---|---|
+| ASR | 0.97–1.28 s | whisper-large-v3, unchanged |
+| LLM to first sentence | ~1.5 s | TTFT 1.15 s + ~0.35 s of tokens |
+| VOICEVOX first sentence | 0.65 s | |
+| **floor** | **~3.1 s** | sum of the three, nothing overlapping |
+| **best observed** | **3.18 s** | a fresh pipeline's first turn |
+| **p50, per-turn harness** | **3.85 s** | 8 turns |
+
+**T0.4's 0.5 s TTFT does not reproduce.** Measured 1.14–1.28 s here, and
+identically with the prompt cache reused and reset — so the KV cache is not the
+lever, and the gap to T0.4 is unexplained. Since the LLM stage is now the largest
+single cost, that discrepancy is the most valuable open thread.
+
+**The p50 of 3.85 s is not a trustworthy figure**, and per constraint 9 that is
+said rather than glossed. The harness rebuilt the pipeline per turn while reusing
+the stage objects, and turn 0 of a fresh pipeline (3.18 s) is consistently faster
+than turns 1–7 (3.7–4.0 s) — an ordering effect the product would not have. A
+continuous-session run through one pipeline reported a p50 of 1.99 s, which is
+*also* untrustworthy: silero produced 9 endpoints for 5 utterances, so per-turn
+attribution was ambiguous and some "turns" measured audio still flowing from the
+previous reply. **What can be said honestly: the floor is ~3.1 s, the best
+observed turn is 3.18 s, and the bound is 3.2 s.** A trustworthy p50 needs a
+harness that feeds one pipeline and segments turns unambiguously.
+
+### What the worker did and did not buy
+
+It removed the blocked event loop, which was real: with the worker, the loop stays
+responsive throughout generation (verified with a 100 ms ticker task that keeps
+firing mid-generation). Sentence one now reaches TTS while sentence two is still
+being generated.
+
+It did **not** move the p50, because a second serialisation was hiding behind the
+first: Pipecat's `TTSService` does not synthesise when its aggregator finds a
+sentence boundary. Traced three times — sentence pushed at 2.60 s, `run_tts`
+entered at 3.10 s, twenty milliseconds after the LLM response *ended*. Neither
+`reuse_context_id_within_turn=False` nor `push_start_frame=True` changed it. That
+is why `VoicevoxTTS` is now a plain `FrameProcessor` (see `speech/tts.py`), which
+did move first-audio ~0.5 s earlier.
+
+## G1a: reworded, and the instrument was wrong twice
+
+Now: **no more than 500 ms without an audible or visible change**, with no
+state-based exemption. Filled pauses fire at the VAD endpoint from a
+pre-synthesised bank.
+
+Two modelling bugs, both found by measuring rather than reasoning:
+
+1. **The blanket `SPEAKING` exemption was a loophole.** Any stretch labelled
+   SPEAKING passed, so one 「ええと」 followed by eight seconds of silence satisfied
+   the check. Fixed by crediting audio for its own duration only.
+2. **Crediting audio to "the current state" was still wrong.** A filler fired at
+   the endpoint plays *across* state changes; the audio stopped counting at the
+   next transition, so the covered stretch still read as silent. Fixed by tracking
+   when audio is actually playing, as a playback cursor — audio delivered in a
+   burst still plays sequentially.
+
+**And a third bug in the feature itself, found the same way.** The filler was
+originally emitted from its trigger position after VAD, and arrived ~1.0 s late
+regardless: a processor's queue is blocked while that processor is busy, so the
+audio waited behind the transcription it was covering for. The emitter now sits
+**last**, downstream of every blocking stage. Same lesson as round 1 in a new
+costume — pushing a frame early is not delivering it early.
+
+Result: **G1a passes on 3 of 8 turns**, up from 0 of 8, and passes over a
+continuous session. The failures are `thinking` gaps of 1.0–2.2 s where the bank
+ran out: `MAX_PER_TURN = 2` gives ~1.5 s of cover against a ~3.8 s wait. Raising
+the cap is deliberately *not* the fix — a third filled pause would mean the
+latency is the problem and the filler is concealing it, which is the thing this
+feature is not for. G1a closes when G1b does.
+
+## What did not change
+
+- G1b's bound. 3.2 s p50 / 4.6 s p95 stand exactly as written.
+- The firewall. It runs before any token is emitted, on the worker path too.
+- The T0.3 ASR decision. Confounded margin, unchanged conclusion — see `asr.md`.

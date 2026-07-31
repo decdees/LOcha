@@ -138,7 +138,19 @@ Recorded because in each case the first run produced a confident, plausible, wro
 
 1. **Language forcing was silently ignored.** `generate_kwargs={"language":"ja"}` has no effect in transformers 5.x when the model's own `generation_config.forced_decoder_ids` is set — forced-`ja` and auto-detect returned byte-identical output. Fixed by clearing it, with an assert so it cannot regress.
 
-2. **Decoder looping was a harness artifact, not a model property.** Unmitigated, large-v3 degenerated on #18 into ~200 repetitions of `カードレス` — **557 insertions, 70.5 s for one utterance** — which tripped the pre-registered looping floor and would have disqualified the eventual winner. `no_repeat_ngram_size=4` fixes it: same utterance, 4.07 s. Applied uniformly to all candidates so the comparison stays fair. Window 4 is deliberately conservative; Japanese legitimately repeats short spans.
+2. **Decoder looping was a harness artifact, not a model property.** Unmitigated, large-v3 degenerated on #18 into ~200 repetitions of `カードレス` — **557 insertions, 70.5 s for one utterance** — which tripped the pre-registered looping floor and would have disqualified the eventual winner. `no_repeat_ngram_size=4` fixes it: same utterance, 4.07 s. Window 4 is deliberately conservative; Japanese legitimately repeats short spans.
+
+   > ### ⚠ CORRECTION (T2.6, 31 July 2026): the bake-off was confounded
+   >
+   > This paragraph claimed the mitigation was "applied uniformly to all candidates so the comparison stays fair". **It was not, and it could not have been.** `no_repeat_ngram_size` is a `transformers` generation parameter. The kotoba candidates ran on `transformers`; whisper-large-v3 ran on **MLX**, where the parameter does not exist — `mlx_whisper.transcribe` raises `DecodingOptions.__init__() got an unexpected keyword argument 'no_repeat_ngram_size'`. Discovered when the production ASR service was written against the same call.
+   >
+   > So the winner was measured **without** repetition mitigation and the losers **with** it. The confound points *against* the winner: large-v3 scored 2.56% CER while carrying a failure mode its competitors had suppressed. `benchmarks/contention.py`, which produced the shipped 1.25 s and the T0.7/T0.9 chain figures, passed no such argument either — so those numbers are consistent with the shipped configuration, and 2.56 is the un-mitigated figure.
+   >
+   > **The decision stands; the margin does not.** A 6.7× gap (2.56 vs 17.09) is far too large to be an artifact of one decoding flag, and the Stage 1 catastrophic-failure gate disqualified both kotoba variants on code-switched output, which repetition mitigation does not touch. But "6.7×" should not be quoted as a measured ratio — it compares two different inference backends with two different decoding configurations. Not re-run: the conclusion does not change and the compute is better spent on Phase 2.
+   >
+   > MLX's own guards are what protect the shipped path — `compression_ratio_threshold` and temperature fallback, both on by default, plus `condition_on_previous_text=False` so a loop cannot persist across turns. No looping has been observed on this path across T0.7, T0.9 or T2.6.
+   >
+   > Now standing constraint 8: never compare models across different backends or decoding-parameter sets.
 
 3. **The corpus itself was invalid on the first attempt** and is documented in `corpus/CHECKLIST.md`. `record.py --verify` now gates T0.3.
 
@@ -146,7 +158,7 @@ Recorded because in each case the first run produced a confident, plausible, wro
 
 ## Limitations, stated plainly
 
-- **2.56 is not a load-bearing figure.** It was measured on **rehearsed read-aloud speech in a quiet room** — the speaker reading a prepared romaji line, one utterance at a time, with retakes allowed. Real conversational input is a different distribution: hesitation, self-correction, mid-sentence restarts, trailing off, false starts, thinking noises. **None of that is tested.** Expect the real-world figure to be materially worse, and do not let 2.56 be quoted as the ASR error rate of the product.
+- **2.56 is not a load-bearing figure**, for two reasons now. The first is the confound above: it was measured without the repetition mitigation its competitors had. The second is the input distribution. It was measured on **rehearsed read-aloud speech in a quiet room** — the speaker reading a prepared romaji line, one utterance at a time, with retakes allowed. Real conversational input is a different distribution: hesitation, self-correction, mid-sentence restarts, trailing off, false starts, thinking noises. **None of that is tested.** Expect the real-world figure to be materially worse, and do not let 2.56 be quoted as the ASR error rate of the product.
 - **The latency column is not apples-to-apples.** Accuracy was measured for all candidates on one backend (transformers+MPS), which is fair. The winning configuration is on MLX, which has no equivalent for `kotoba-whisper-bilingual-v1.0` — no MLX conversion exists. kotoba on MLX would likely be faster than 1.10 s. This does not change the decision, since large-v3 wins accuracy by 4–7×, but "large-v3 is as fast as kotoba" compares across runtimes.
 - **n = 20, one speaker, one session.** Enough to separate 2.56 from 17.09. **Not** enough to resolve differences of 1–2 CER points, and no basis at all for a confidence interval. Treat the ordering as robust and the exact values as indicative.
 - **The corpus is 50/50 by construction; real usage is not.** Aggregate CER is the least meaningful column. Stage 1 and the per-subset columns carry the decision.

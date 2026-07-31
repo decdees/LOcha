@@ -43,6 +43,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from ocha.speech.filler import FillerAudioFrame
 from ocha.speech.wire import state_message
 from ocha.turnstate import TurnState, TurnTimeline
 
@@ -67,6 +68,7 @@ _STATE_FOR: dict[type[Frame], TurnState] = {
     LLMFullResponseStartFrame: TurnState.THINKING,
     TTSStartedFrame: TurnState.SPEAKING,
     TTSAudioRawFrame: TurnState.SPEAKING,
+    FillerAudioFrame: TurnState.SPEAKING,
     BotStartedSpeakingFrame: TurnState.SPEAKING,
     BotStoppedSpeakingFrame: TurnState.IDLE,
 }
@@ -142,6 +144,13 @@ class TurnStateProbe(FrameProcessor):
         # counting it here made tts_s read 15 ms against VOICEVOX's real ~0.5 s, and
         # so under-reported voice-to-first-audio by half a second. It still maps to
         # the SPEAKING state below, which is a claim about feedback, not about audio.
+        #
+        # FillerAudioFrame is excluded. A filled pause is real feedback and counts
+        # for G1a via the state below, but counting it here would make G1b measure
+        # how fast the tutor can say 「ええと」 -- a number that improves while the
+        # product does not.
+        elif isinstance(frame, FillerAudioFrame):
+            pass  # feedback for G1a via the state below, never a G1b measurement
         elif isinstance(frame, TTSAudioRawFrame | BotStartedSpeakingFrame):
             self.spans.mark("first_audio", now)
 
@@ -161,6 +170,13 @@ class TurnStateProbe(FrameProcessor):
                         OutputTransportMessageUrgentFrame(message=state_message(state.value)),
                         FrameDirection.DOWNSTREAM,
                     )
+
+        # Credit audio AFTER the state block, not before: the first audio frame of a
+        # turn is also what emits SPEAKING, and crediting first would attribute its
+        # duration to whatever state preceded it -- or to nothing at all on an empty
+        # timeline, which is how this was first written and why audio_s read 0.
+        if isinstance(frame, TTSAudioRawFrame):
+            self.timeline.add_audio(len(frame.audio) / 2 / (frame.sample_rate or 16_000))
 
         # Forward immediately. Never buffer -- see the module docstring.
         await self.push_frame(frame, direction)

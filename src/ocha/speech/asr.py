@@ -7,11 +7,15 @@ Written against `mlx_whisper` directly rather than using Pipecat's
    for the MLX class, so using it means installing CTranslate2 to run a model we
    already call directly.
 2. **Threading.** Standing constraint 6: MLX GPU streams are thread-local to the
-   thread that ran `load()`. `run_stt` is awaited on the event loop, which is
-   where the LLM is loaded during lifespan, so both models stay on one thread.
-   Anything that moved transcription to a threadpool would fail at runtime with
-   `There is no Stream(gpu, 1) in current thread` -- and no stub-based test would
-   catch it, because tests never load MLX.
+   thread that ran `load()`. Transcription therefore runs on the `InferenceWorker`
+   thread, which is the thread that loaded both this model and the LLM. It must
+   never be called anywhere else -- and no stub-based test would catch it if it
+   were, because tests never load MLX.
+
+   Whisper moved onto the worker for the same measured reason the LLM did (T2.6):
+   transcription blocks for ~1.0 s, and while it holds the event loop nothing can
+   be delivered to the client -- including the filled pause that G1a now depends
+   on to cover exactly this gap.
 
 `wants_wav_segments = False`: whisper takes a float32 array, so a WAV header
 would be 44 bytes of noise at the front of every utterance.
@@ -33,6 +37,7 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
+from ocha.inference import InferenceWorker
 from ocha.speech.wire import SAMPLE_RATE
 
 MODEL = "mlx-community/whisper-large-v3-mlx"
@@ -65,12 +70,17 @@ MIN_SEGMENT_S = 0.3
 class OchaWhisper(SegmentedSTTService):
     """Transcribes one VAD-delimited segment at a time."""
 
-    def __init__(self, *, model: str = MODEL, **kwargs: object) -> None:
+    def __init__(
+        self, *, model: str = MODEL, worker: InferenceWorker | None = None, **kwargs: object
+    ) -> None:
         # Settings are declared rather than left NOT_GIVEN: Pipecat logs an ERROR
         # for each unset field, and an error-level line that is always there trains
         # you to ignore error-level lines.
         super().__init__(settings=STTSettings(model=model, language=LANGUAGE), **kwargs)  # type: ignore[arg-type]
         self._model = model
+        # None only in tests that never load MLX. In the app it is always set, and
+        # `_transcribe` running inline is a thread-affinity bug waiting to happen.
+        self._worker = worker
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -79,8 +89,9 @@ class OchaWhisper(SegmentedSTTService):
     def warm(self) -> None:
         """Load and compile by transcribing 100 ms of silence.
 
-        Called from lifespan on the event-loop thread. Silence is deliberate:
-        the point is to pay the load and graph-compile cost, not to get a result.
+        **Must be called on the worker thread** -- pass it to `InferenceWorker.start`
+        as a loader. Silence is deliberate: the point is to pay the load and
+        graph-compile cost, not to get a result.
         """
         import mlx_whisper
 
@@ -95,8 +106,6 @@ class OchaWhisper(SegmentedSTTService):
     async def run_stt(  # type: ignore[override]
         self, audio: bytes
     ) -> AsyncGenerator[Frame | None, None]:
-        import mlx_whisper
-
         samples = np.frombuffer(audio, dtype=np.int16)
         # `or SAMPLE_RATE`: self.sample_rate is 0 until the pipeline's StartFrame
         # reaches start(). In the pipeline it is always set; standalone it is not,
@@ -107,14 +116,27 @@ class OchaWhisper(SegmentedSTTService):
 
         # int16 -> float32 in [-1, 1). Dividing by 32768 rather than 32767 keeps
         # the mapping exact in binary and matches what whisper's own loader does.
-        result = mlx_whisper.transcribe(
-            samples.astype(np.float32) / 32768.0,
-            path_or_hf_repo=self._model,
-            language=LANGUAGE,
-            condition_on_previous_text=CONDITION_ON_PREVIOUS_TEXT,
-        )
-        text = str(result["text"]).strip()
+        text = await self._transcribe(samples)
         if not text:
             yield None
             return
         yield TranscriptionFrame(text, "", time_now_iso8601(), language=LANGUAGE)
+
+    async def _transcribe(self, samples: np.ndarray) -> str:
+        def work() -> str:
+            import mlx_whisper
+
+            result = mlx_whisper.transcribe(
+                samples.astype(np.float32) / 32768.0,
+                path_or_hf_repo=self._model,
+                language=LANGUAGE,
+                condition_on_previous_text=CONDITION_ON_PREVIOUS_TEXT,
+            )
+            return str(result["text"]).strip()
+
+        if self._worker is None:
+            raise RuntimeError(
+                "OchaWhisper has no InferenceWorker. MLX streams are thread-local "
+                "(constraint 6); running inline would work until it did not."
+            )
+        return str(await self._worker.call(work))

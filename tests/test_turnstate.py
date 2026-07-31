@@ -67,14 +67,35 @@ def test_a_long_silent_state_violates_g1a() -> None:
     assert gap == pytest.approx(1.2)
 
 
-def test_speaking_is_exempt_because_audio_is_itself_feedback() -> None:
-    """A long SPEAKING stretch is the tutor talking, not the app hanging."""
+def test_speaking_is_credited_with_the_audio_it_delivered() -> None:
+    """A long SPEAKING stretch is the tutor talking -- for as long as there is audio.
+
+    This test used to assert that SPEAKING was exempt outright, with no audio
+    accounted for. That was the loophole T2.8 closed: a tutor that said 「ええと」
+    once and then went quiet for eight seconds passed, which is relabelling the
+    criterion rather than meeting it. Audio is feedback for its own duration.
+    """
     c = FakeClock()
     tl = timeline_with(c)
     tl.emit(TurnState.SPEAKING)
-    c.advance(8.0)  # a long tutor reply
+    tl.add_audio(8.0)  # eight seconds of reply actually played
+    c.advance(8.0)
     tl.finish()
     assert tl.satisfies_g1a()
+
+
+def test_speaking_with_no_audio_behind_it_is_still_silence() -> None:
+    """The loophole, asserted directly so it cannot reopen."""
+    c = FakeClock()
+    tl = timeline_with(c)
+    tl.emit(TurnState.SPEAKING)
+    tl.add_audio(0.7)  # one filled pause
+    c.advance(8.0)  # ...then nothing for eight seconds
+    tl.finish()
+    assert not tl.satisfies_g1a(), "silence after the audio ran out is still silence"
+    ((state, silent),) = tl.violations()
+    assert state is TurnState.SPEAKING
+    assert silent == pytest.approx(7.3)
 
 
 def test_the_boundary_is_inclusive() -> None:

@@ -26,23 +26,27 @@ so the gate costs nothing correctness was not already charging for.
 **This started out as "generate the whole reply first", which measurement
 rejected.** Holding until generation finished put the LLM stage at 1.99 s against
 T0.7's 0.75 s first-sentence figure, and pushed voice-to-first-audio to 3.67 s --
-outside PRD G1b's 3.2 s p50 bound. See benchmarks/voice-loop.md. The laziest
-version of this stage was not viable, and the measurement is what said so rather
-than an argument about streaming being good practice.
+outside PRD G1b's 3.2 s p50 bound. Streaming alone then bought nothing, because
+generation was blocking the event loop and a pushed frame is not a delivered one.
+Both facts are why the `InferenceWorker` exists. See benchmarks/voice-loop.md.
 
 ## Threading
 
-Everything here runs on the event loop, deliberately, and must keep doing so.
-MLX GPU streams are thread-local to the thread that ran `load()` (constraint 6),
-and the SQLite connection is bound to the thread that opened it -- both are the
-lifespan thread. `asyncio.to_thread` around either one fails at runtime and no
-stub-based test would catch it.
+Split, and the split is load-bearing:
+
+- **Generation runs on the `InferenceWorker` thread**, which owns both models for
+  the process lifetime (constraint 6). Chunks arrive here through an asyncio queue,
+  so the event loop stays free while the model works -- that is what lets VOICEVOX
+  synthesise sentence one while sentence two is still being generated.
+- **`run_turn` runs on the event loop**, because the SQLite connection is bound to
+  the thread that opened it. Sending DB work to the worker reproduces the T1.8
+  thread-affinity bug from the other direction.
 """
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
+from collections.abc import AsyncIterator
 
 from pipecat.frames.frames import (
     Frame,
@@ -62,11 +66,6 @@ from ocha.tutor.llm import LlmService
 from ocha.tutor.turn import TurnResult, run_turn
 
 SENTENCE_ENDINGS = "。！？"
-
-# Long enough for a pushed frame to reach the TTS service and for its synthesis
-# thread to be dispatched; short enough to be noise against a ~50 ms token. Paid
-# once per sentence, not per token.
-DELIVERY_YIELD_S = 0.001
 
 
 class TutorStage(FrameProcessor):
@@ -94,6 +93,21 @@ class TutorStage(FrameProcessor):
             await self._handle(frame.text.strip())
             return
         await self.push_frame(frame, direction)
+
+    async def _chunks(self, system_prompt: str, user_text: str) -> AsyncIterator[str]:
+        """Token chunks off the worker thread, or off a stub in tests.
+
+        `astream` is the worker-backed path. A plain `LlmService` (the stubs, and
+        anything not backed by MLX) has only the synchronous `stream`, which is
+        fine to iterate inline precisely because it is not doing GPU work.
+        """
+        astream = getattr(self._llm, "astream", None)
+        if astream is not None:
+            async for chunk in astream(system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS):
+                yield str(chunk)
+            return
+        for chunk in self._llm.stream(system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS):
+            yield chunk
 
     async def _handle(self, user_text: str) -> None:
         await self.push_frame(LLMFullResponseStartFrame())
@@ -151,9 +165,8 @@ class TutorStage(FrameProcessor):
         before `apply_firewall` has seen the first sentence, and if the sentinel
         fires, generation stops and not one token is pushed.
 
-        Blocking on the event loop between tokens, deliberately -- MLX streams are
-        thread-local to the loading thread (constraint 6) and the SQLite connection
-        is bound to the same thread. See "Threading" below.
+        Generation happens on the worker thread; this coroutine only consumes
+        chunks, so the event loop stays free to deliver what it pushes.
         """
         ctx = build_context(self._scheduler)
         raw = ""
@@ -161,17 +174,9 @@ class TutorStage(FrameProcessor):
         gate_open = False
         pending = ""
 
-        for chunk in self._llm.stream(ctx.system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS):
+        async for chunk in self._chunks(ctx.system_prompt, user_text):
             raw += chunk
             pending += chunk
-            # Yield on every token, not only at sentence boundaries. Sentence-only
-            # yielding got the first sentence into TTS early but the *audio* still
-            # could not come back: VOICEVOX synthesises in a thread and finishes
-            # while this loop is generating, and the frames it produced needed the
-            # event loop to be delivered. Measured: tts_s went from 0.69 s to 1.20 s
-            # -- the wait moved rather than disappearing. ~1 ms per token against a
-            # ~50 ms token is noise; a blocked loop is not.
-            await asyncio.sleep(DELIVERY_YIELD_S)
             if not any(ch in pending for ch in SENTENCE_ENDINGS):
                 continue
 
@@ -187,17 +192,6 @@ class TutorStage(FrameProcessor):
                 await self.push_frame(LLMTextFrame(sentence))
                 emitted += sentence
             pending = ""
-            # Yield the loop, or the sentence just pushed is not *delivered* until
-            # generation ends. push_frame only queues; the downstream processor
-            # drains that queue in another task, and this one owns the event loop
-            # for the whole generation (constraint 6 forbids moving it off).
-            # Without this the gate opened on time and bought nothing: measured
-            # 2.07 s to first text either way. `sleep(0)` alone was also not enough --
-            # it yields exactly one pass, and this task becomes ready again before the
-            # frame has crossed the remaining processors, so it blocks for the next
-            # token instead. A small real delay lets the chain drain and VOICEVOX start
-            # on sentence one, overlapping the rest of generation.
-            await asyncio.sleep(DELIVERY_YIELD_S)
 
         # A reply that never reached a sentence boundary -- or a sentinel-only one.
         if pending.strip():

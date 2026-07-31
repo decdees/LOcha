@@ -33,7 +33,6 @@ from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.services.tts_service import TTSService
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -41,6 +40,7 @@ from pipecat.transports.websocket.fastapi import (
 
 from ocha.scheduling.scheduler import ItemScheduler
 from ocha.speech.asr import OchaWhisper
+from ocha.speech.filler import FillerBank, FillerProcessor, FillerState
 from ocha.speech.probe import Spans, TurnStateProbe
 from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.tutor_stage import TutorStage
@@ -109,7 +109,8 @@ def build_pipeline(
     llm: LlmService,
     *,
     asr: SegmentedSTTService | None = None,
-    tts: TTSService | None = None,
+    tts: FrameProcessor | None = None,
+    fillers: FillerBank | None = None,
 ) -> tuple[Pipeline, TurnStateProbe]:
     """The real loop. `asr`/`tts` are injectable so tests can run it without MLX.
 
@@ -136,17 +137,33 @@ def build_pipeline(
     timeline = TurnTimeline()
     taps = [TurnStateProbe(timeline=timeline, spans=spans, emit_state=True) for _ in range(4)]
     after_vad, after_asr, after_tutor, tail = taps
+
+    # The filled-pause pair: trigger right after VAD, emitter last. The emitter is
+    # last because a processor's queue is blocked while that processor is busy, so
+    # audio pushed from before ASR waits behind transcription -- measured at ~1.0 s
+    # late, covering nothing. See speech/filler.py. Skipped entirely when no bank
+    # was synthesised: a filler that must be synthesised on demand would sit inside
+    # the gap it exists to cover.
+    #
+    # NOTE the construction order -- the emitter registers itself on the state, so it
+    # must exist before the trigger can fire through it.
+    filler_state = FillerState()
+    emit = [FillerProcessor(fillers, filler_state, emit=True)] if fillers else []
+    trigger = [FillerProcessor(fillers, filler_state)] if fillers else []
+
     return (
         Pipeline(
             [
                 transport.input(),
                 VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VAD_PARAMS)),
                 after_vad,
+                *trigger,
                 asr if asr is not None else OchaWhisper(),
                 after_asr,
                 TutorStage(conn, scheduler, reference, llm),
                 after_tutor,
                 tts if tts is not None else VoicevoxTTS(),
+                *emit,
                 tail,
                 transport.output(),
             ]
@@ -164,7 +181,8 @@ async def run_session(
     *,
     loopback: bool = False,
     asr: SegmentedSTTService | None = None,
-    tts: TTSService | None = None,
+    tts: FrameProcessor | None = None,
+    fillers: FillerBank | None = None,
 ) -> TurnStateProbe:
     """Serve one client connection for its whole life. Returns the probe.
 
@@ -176,7 +194,7 @@ async def run_session(
         pipeline, probe = build_loopback(transport)
     else:
         pipeline, probe = build_pipeline(
-            transport, conn, scheduler, reference, llm, asr=asr, tts=tts
+            transport, conn, scheduler, reference, llm, asr=asr, tts=tts, fillers=fillers
         )
     # PipelineWorker/WorkerRunner, not PipelineTask/PipelineRunner: the latter pair
     # is deprecated as of Pipecat 1.3 and removed at 2.0. Same objects, new names.

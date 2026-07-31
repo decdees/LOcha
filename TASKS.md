@@ -199,12 +199,12 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - [ ] **DECISION NEEDED — a dedicated single-threaded inference worker with a queue.** Constraint 6 names this as the only correct shape once concurrency is needed. It now is. Expected recovery ~0.6–0.9 s, which is what G1b needs.
 - [ ] Live measurement from the phone: ≥20 spoken turns, once the client exists.
 
-### T2.7 — Native iOS client, voice-first *(absorbs the deleted T1.9 and T2.8's UI)*
-- [ ] SwiftUI app in `ios/`: continuous-listening voice UI, live transcript (user + tutor), furigana on tutor output, grammar panel on `[GRAMMAR_QUERY]`. Text input as a fallback mode, not the primary interface.
-- [ ] `AVAudioSession` `.playAndRecord` + `.voiceChat`, `.allowBluetooth`. **Log the resolved input route on every session start** — the pre-flight showed iOS picks the capture device unpredictably, and the native app must at least *observe* what it got even where it cannot dictate it.
-- [ ] `AVAudioEngine` tap → 16 kHz mono PCM → `URLSessionWebSocketTask` to `wss://<mac>/ws`. Playback through `AVAudioPlayerNode`; barge-in stops playback on the server's user-started-speaking signal.
-- [ ] Free-account signing; reachable over Tailscale.
-- **Not doing:** the PWA. It passed its gates and stays in `web/` as the documented fallback — see `benchmarks/ios-audio.md` and PRD FR-9.
+### T2.7 — Browser client, voice-first *(absorbs the deleted T1.9 and T2.8's UI)*
+- [ ] `getUserMedia` + `AudioWorklet` → 16 kHz mono PCM over a WebSocket to `/ws`. Playback via `AudioContext`; barge-in drops the queue on `interrupt`.
+- [ ] Continuous-listening UI: live transcript (user + tutor), furigana on tutor output, grammar panel on `[GRAMMAR_QUERY]`, turn-state indicator driven by the server's `state` messages. Text input as a fallback mode, not the primary interface.
+- [ ] **Developed against the Mac's own browser first.** No audio-routing quirk, no provisioning, no Tailscale hop — none of them debugged at the same time as the pipeline.
+- [ ] Then the same client from the iPhone as an installed PWA over Tailscale. **Unblocked:** both pre-flight gates passed (`benchmarks/ios-audio.md`).
+- **Not doing before October:** the native SwiftUI app. See T4.5 and ARCHITECTURE §2.3.
 - [ ] Pitch-accent visualisation is a Phase 3 slot — leave the panel space, ship nothing in it.
 - **Acceptance:** the user completes a 10-turn *spoken* exchange from an iPhone.
 
@@ -215,11 +215,8 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - **Why this is not polish:** the restructured G1 makes "no dead air beyond ~500 ms without visible or audible feedback" a first-class criterion. At a measured 2.5 s voice-to-first-audio, feedback is what decides whether the app feels broken or merely deliberate. A silent 2.5 s gap reads as a crash; a 2.5 s gap with a live transcript reads as listening.
 - **Acceptance:** no state in a real turn leaves the user without feedback for more than 500 ms.
 
-### T2.10 — Weekly re-deploy workflow *(new — the cost of free-account signing)*
-- [ ] `make ios-deploy` → one `xcodebuild` build-and-install against the connected phone.
-- [ ] README section: the 7-day ritual, plus the one-time prerequisites (`sudo xcode-select -s /Applications/Xcode.app`, Apple ID in Xcode, Developer Mode on the phone, trust the certificate).
-- **Why a task and not a footnote:** a free provisioning profile expires after 7 days. An undocumented manual ritual is the kind of thing that silently ends a side project in week three.
-- **Acceptance:** the app is re-installed from a cold start in under 5 minutes using only what the README says.
+### T2.10 — *(deleted)* Weekly re-deploy workflow
+Cut with the native client. Nothing to re-sign — a PWA installs from a URL. See T4.5.
 
 ### T2.9 — NFR-6 thermal soak
 - [ ] 30-minute sustained session; assert p50 latency degrades by less than 20%.
@@ -268,7 +265,20 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - [ ] Check that scoring against native and against VOICEVOX **ranks the same attempts in the same order.** Rank correlation, not absolute agreement.
 - **Acceptance:** a written result. The FR-8 accent cap stays disabled until this passes.
 
-### T3.7 — Pitch contour visualisation in the PWA
+### T4.5 — Native iOS app *(post-October, deliberately)*
+Deferred from Phase 2 on 31 July 2026, after being started and stopped the same day. The reasons it is worth doing eventually: `AVAudioSession` gives explicit category/route control where WebKit only infers it (the pre-flight found the capture device varies between runs), background audio when the screen locks, and independence from WebKit media policy. ARCHITECTURE §2.3.
+
+The reason it is not Phase 2: a Swift client is a second codebase — `AVAudioEngine`, transport, transcript UI, furigana, barge-in — realistically 3–4 weekends, started before Phase 2 was finished, nine weeks from the deadline. PRD §10's scope breach exactly.
+
+**Free-account constraints to plan around** (they shape the design, so record them now):
+- Provisioning profiles expire after **7 days**, silently. A daily-habit SRS tool that dies weekly is worse than no app.
+- **10 App IDs per 7-day period**, so bundle identifiers cannot be churned during development.
+- **3 devices** per account.
+- **Use a separate Apple ID from the outset.** A free personal team cannot be upgraded cleanly, and an account that has been used for 7-day provisioning drags that history along — a later paid upgrade should not be stuck behind it.
+
+The wire format is deliberately trivial (JSON control messages + raw PCM, `speech/wire.py`) so a Swift client is a client, not a port.
+
+### T3.7 — Pitch contour visualisation in the client
 - [ ] Trend over time, never an absolute grade (PRD FR-6).
 
 > **Validate early:** alignment-free GOP is published on English and child-speech corpora (speechocean762, CMU Kids). Japanese transfer is untested. Run T3.2 against 10 deliberately mispronounced utterances and inspect before building T3.5 on top of it.

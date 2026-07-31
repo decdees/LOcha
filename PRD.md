@@ -7,7 +7,7 @@
 
 ## 1. Summary
 
-Ocha is a fully self-hosted, speech-to-speech Japanese conversation tutor. It runs entirely on a single MacBook Pro M4 (32 GB), is accessed from a native iPhone app over Tailscale, and costs $0/month in recurring fees.
+Ocha is a fully self-hosted, speech-to-speech Japanese conversation tutor. It runs entirely on a single MacBook Pro M4 (32 GB), is accessed from an iPhone PWA over Tailscale, and costs $0/month in recurring fees.
 
 It differs from commercial apps (Falou, Duolingo, Speak) on two axes. The **long-term** differentiator is that it measures Japanese pitch accent deterministically and schedules practice against that measurement — deferred to post-October 2026 (§10). What ships before then is spoken production practice against a vocabulary pool the learner has actually earned, with grammar served from curated reference rather than generated, at $0/month. That is not the full thesis, and §10 states the trade plainly.
 
@@ -38,7 +38,7 @@ The target learner is an absolute beginner in Japanese, aiming at travel and con
 
 - Multi-user, authentication, or account management. One user, Tailscale is the perimeter.
 - Kanji writing practice, reading comprehension of long text, JLPT prep.
-- ~~Native mobile app. PWA only.~~ **Reversed, 31 July 2026.** The client is a native SwiftUI app; see FR-9. Not because the PWA failed — both T2.1 pre-flight gates passed (`benchmarks/ios-audio.md`) — but because native gives explicit `AVAudioSession` route and category control, background audio, and independence from WebKit media policy. The PWA stays documented as the proven fallback.
+- **Native mobile app before October. PWA only.** ~~Reversed 31 July 2026~~ — **and reversed back the same day, deliberately.** The native pivot lasted one commit. It is restored as a non-goal because a SwiftUI client is a second codebase (`AVAudioEngine`, transport, transcript UI, furigana, barge-in), realistically 3–4 weekends, and it was about to be started *before Phase 2 was finished*, nine weeks from the deadline. That is precisely the scope breach §10 exists to prevent. Free provisioning also expires every 7 days with no warning, which is corrosive for a daily-habit SRS tool. Native iOS is now a **Phase 4, post-October** item (TASKS T4.5).
 - Fine-tuning any model.
 - Offline operation on the phone. The Mac must be reachable.
 - Voice cloning or expressive/emotional TTS.
@@ -124,12 +124,12 @@ Single user, self-hosting. Design parameters that drive functional requirements:
   | Accent score below threshold | **PROVISIONAL — disabled by default.** Must not gate scheduling until validated by T3.6. Stubbed and inert through Phases 1–2; the code path and its test exist, the score does not. |
 
 ### FR-9 — Client
-- **Native SwiftUI app on iPhone**, sideloaded with a free Apple Developer account. Streams 16 kHz mono PCM to the Mac over a WebSocket on Tailscale.
+- **Browser client, served by the Mac and run on the Mac** for Phase 2. Streams 16 kHz mono PCM over a WebSocket to `/ws`. No audio-routing quirk, no provisioning, no Tailscale hop — the three things that would otherwise be debugged simultaneously with the pipeline.
+- The **iPhone PWA is the shipping target** and is unblocked: both T2.1 pre-flight gates passed (`benchmarks/ios-audio.md`) — `getUserMedia` works in standalone home-screen mode and audio output stays on the headset with the mic live. Moving from the Mac browser to the phone is the same client over Tailscale.
+- A **native SwiftUI app is Phase 4, post-October** (TASKS T4.5), not before.
 - Displays: live transcript (user + tutor), furigana on tutor output, pitch accent visualisation after each turn, grammar panel on `[GRAMMAR_QUERY]`, and an explicit turn-state indicator (listening / transcribing / thinking / speaking) — G1a is a client requirement as much as a server one.
 - Text input mode available as a fallback *within* the voice-first app, for noisy environments and ASR failures. It is not a separate interface and not a Phase 1 deliverable — Phase 1 exposes `POST /turn` and no client.
-- **Accepted operating cost:** a free provisioning profile expires after **7 days**. The app is re-deployed weekly from Xcode (~2 minutes, one command). This was chosen over a paid account deliberately, consistent with G5. It also means the app can never be installed by anyone else, which for a single-user product is not a constraint.
-- **Audio routing is a knowing trade.** iOS cannot combine the built-in microphone with A2DP output; requesting the built-in mic forces output to the speaker. With a headset connected the app uses HFP duplex (headset mic + headset output) and accepts the narrowband quality cost. The alternative — phone mic + phone speaker — remains available and is the fallback if T2.3 finds HFP audio degrades CER.
-- The React PWA (`web/`) is a proven fallback, not a deliverable. See `benchmarks/ios-audio.md`.
+- **Audio routing remains a known constraint of the phone, whatever the client is.** iOS cannot combine the built-in microphone with A2DP output; requesting the built-in mic forces output to the speaker. With a headset connected the session is HFP duplex in both directions, at narrowband quality into the ASR. Unmeasured — T2.3 measures it, and the fallback if CER degrades is phone mic + phone speaker.
 
 ---
 

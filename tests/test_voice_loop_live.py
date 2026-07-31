@@ -38,8 +38,10 @@ from pipecat.tests.utils import run_test
 
 from ocha.db import connect, migrate
 from ocha.db.seed import seed
+from ocha.inference import InferenceWorker, WorkerLlm
 from ocha.scheduling import ItemScheduler
 from ocha.speech.asr import OchaWhisper
+from ocha.speech.filler import FillerAudioFrame, FillerBank, FillerProcessor, FillerState
 from ocha.speech.pipeline import VAD_PARAMS
 from ocha.speech.probe import Spans, TurnStateProbe
 from ocha.speech.tts import VoicevoxTTS
@@ -69,15 +71,25 @@ def db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
 
 
 async def test_a_real_utterance_becomes_real_speech(db: sqlite3.Connection) -> None:
-    llm = MlxLlm()
-    llm.load()  # on this thread, which is the thread that will generate. Constraint 6.
-
-    asr = OchaWhisper(sample_rate=SAMPLE_RATE)
-    asr.warm()
+    # One thread owns both models for their whole life, and loads them itself.
+    # Constraint 6, and T2.6 measured why it matters: on the event loop, inference
+    # blocks frame delivery for its entire duration.
+    base = MlxLlm()
+    worker = InferenceWorker()
+    asr = OchaWhisper(sample_rate=SAMPLE_RATE, worker=worker)
+    worker.start(base.load, asr.warm)
+    llm = WorkerLlm(worker, base)
 
     # The shipped assembly minus the transport, so the two probe taps and the stage
     # order are the ones that ship. Building a bespoke chain here would measure a
     # pipeline nobody runs.
+    tts = VoicevoxTTS(sample_rate=SAMPLE_RATE)
+    fillers = await FillerBank.synthesise(tts, SAMPLE_RATE)
+    filler_state = FillerState()
+    # Emitter constructed first: it registers itself on the state, and the trigger
+    # fires through it. It also has to sit LAST in the pipeline -- see filler.py.
+    emitter = FillerProcessor(fillers, filler_state, emit=True)
+
     spans = Spans()
     timeline = TurnTimeline()
     probe = TurnStateProbe(timeline=timeline, spans=spans, emit_state=True)
@@ -85,11 +97,13 @@ async def test_a_real_utterance_becomes_real_speech(db: sqlite3.Connection) -> N
         [
             VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VAD_PARAMS)),
             TurnStateProbe(timeline=timeline, spans=spans, emit_state=True),
+            FillerProcessor(fillers, filler_state),
             asr,
             TurnStateProbe(timeline=timeline, spans=spans, emit_state=True),
             TutorStage(db, ItemScheduler(db), load_grammar(), llm),
             TurnStateProbe(timeline=timeline, spans=spans, emit_state=True),
-            VoicevoxTTS(sample_rate=SAMPLE_RATE),
+            tts,
+            emitter,
             probe,
         ]
     )
@@ -128,3 +142,8 @@ async def test_a_real_utterance_becomes_real_speech(db: sqlite3.Connection) -> N
     # path, or a stage that buffered.
     v2fa = report["voice_to_first_audio_s"]
     assert isinstance(v2fa, float) and 0 < v2fa < 8.0, f"implausible: {v2fa}"
+
+    # Filled pauses must have covered the wait. If none played, G1a's remedy is
+    # not working and the number above is the only thing keeping the turn tolerable.
+    assert any(isinstance(f, FillerAudioFrame) for f in down), "no filled pause played"
+    worker.stop()

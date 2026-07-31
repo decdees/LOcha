@@ -43,7 +43,6 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.services.stt_service import SegmentedSTTService
-from pipecat.services.tts_service import TTSService
 from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -52,6 +51,7 @@ from ocha.db import connect, migrate
 from ocha.db.seed import seed
 from ocha.scheduling import ItemScheduler
 from ocha.speech.probe import TurnStateProbe
+from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.tutor_stage import TutorStage
 from ocha.speech.wire import SAMPLE_RATE
 from ocha.tutor.firewall import SENTINEL
@@ -87,20 +87,22 @@ class StubWhisper(SegmentedSTTService):
         yield TranscriptionFrame(self.transcript, "", time_now_iso8601(), language=Language.JA)
 
 
-class StubVoicevox(TTSService):
-    """Records what it was asked to say and emits a token of silence."""
+class StubVoicevox(VoicevoxTTS):
+    """The real service with only the HTTP call replaced.
+
+    A subclass rather than a separate fake, so these tests exercise the real frame
+    handling -- which sentences get synthesised, which do not, and when the started
+    and stopped frames are emitted. A hand-written fake would have agreed with
+    whatever the pipeline did.
+    """
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self.spoken: list[str] = []
 
-    async def run_tts(  # type: ignore[override]
-        self, text: str, context_id: str
-    ) -> AsyncGenerator[Frame | None, None]:
+    def _synthesise(self, text: str) -> bytes:
         self.spoken.append(text)
-        yield TTSAudioRawFrame(
-            audio=b"\x00\x00" * 160, sample_rate=self.sample_rate, num_channels=1
-        )
+        return b"\x00\x00" * 160  # 10 ms of silence
 
 
 @pytest.fixture

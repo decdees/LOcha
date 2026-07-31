@@ -96,20 +96,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.scheduler = ItemScheduler(conn)
 
     llm: LlmService = MlxLlm()
+    app.state.worker = None
     if not SKIP_MODEL:
-        # Raises if unavailable. There is no cloud fallback to fall back to.
-        llm.load()  # type: ignore[attr-defined]
-        # Warm whisper on this same thread, for the same reason and by the same
-        # rule: MLX streams belong to the thread that loaded the model, and both
-        # models are used from the event loop. A cold whisper load inside the
-        # first turn is a correctness bug, not a slow path (constraint 3).
+        from ocha.inference import InferenceWorker, WorkerLlm
         from ocha.speech.asr import OchaWhisper
+        from ocha.speech.filler import FillerBank
+        from ocha.speech.tts import VoicevoxTTS
 
-        asr = OchaWhisper(sample_rate=SAMPLE_RATE)
-        asr.warm()
+        # ONE thread owns both models for the process lifetime. Loading happens on
+        # that thread, inside start(), because MLX GPU streams are thread-local to
+        # whoever ran load() -- standing constraint 6. T2.6 measured why it is a
+        # thread and not the event loop: inference there blocks frame delivery for
+        # its whole duration. See benchmarks/voice-loop.md.
+        worker = InferenceWorker()
+        asr = OchaWhisper(sample_rate=SAMPLE_RATE, worker=worker)
+        worker.start(llm.load, asr.warm)  # type: ignore[attr-defined]
+        app.state.worker = worker
         app.state.asr = asr
+        llm = WorkerLlm(worker, llm)
+
+        # Pre-synthesised filled pauses. ~0.4 s each here, 0 ms in the turn.
+        app.state.fillers = await FillerBank.synthesise(
+            VoicevoxTTS(sample_rate=SAMPLE_RATE), SAMPLE_RATE
+        )
     app.state.llm = llm
     yield
+    if app.state.worker is not None:
+        app.state.worker.stop()
 
 
 app = FastAPI(title="Ocha", docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -178,6 +191,7 @@ async def ws(websocket: WebSocket, loopback: bool = False) -> None:
         # the load cost again inside the first turn.
         asr=getattr(app.state, "asr", None),
         tts=getattr(app.state, "tts", None),
+        fillers=getattr(app.state, "fillers", None),
     )
     logging.getLogger(__name__).info("ws session ended: %s", probe.report())
 

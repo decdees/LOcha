@@ -19,7 +19,7 @@ Three things invalidate parts of the earlier plan:
 |---|---|
 | Budget | $0/month recurring. One-time downloads only. |
 | Hardware | MacBook Pro M4, 32 GB unified memory |
-| Client | Native SwiftUI app on iPhone, over Tailscale (~~React PWA~~ — reversed 31 July 2026, §2.3) |
+| Client | Browser (Mac) in Phase 2, iPhone PWA over Tailscale for shipping; native iOS deferred post-October — §2.3 |
 | Target turn latency | ~~< 1.2s p50~~ **G1a: no dead air >500 ms without feedback; G1b: p50 ≤ 3.2 s** (PRD §7a) |
 | Blocking schedule risk | Hard external deadline, October 2026 |
 | Pedagogical anchor | Falou-style drilling + free conversation, FSRS-scheduled |
@@ -35,7 +35,7 @@ Three things invalidate parts of the earlier plan:
 | Orchestration | **Pipecat** (BSD-2) | Free | negligible |
 | Transport | ~~WebRTC (`SmallWebRTCTransport`)~~ **WebSocket** (`FastAPIWebsocketTransport`), 16 kHz mono PCM — reversed with the client, §2.3 | — | — |
 | VAD / turn detection | **silero-vad** + Pipecat smart-turn | MIT | ~50 MB |
-| ASR | ~~kotoba-whisper-v2.0~~ **whisper-large-v3 on MLX** (`mlx-community/whisper-large-v3-mlx`) — **T0.3 REVERSED this**, see §2.1 | Apache 2.0 | ~3 GB |
+| ASR | ~~kotoba-whisper-v2.0~~ **whisper-large-v3 on MLX** (`mlx-community/whisper-large-v3-mlx`) — **T0.3 REVERSED this**, see §2.1. Wrapped by hand, **not** via `pipecat-ai[mlx-whisper]`: that module imports `faster_whisper` at module scope even for its MLX class, so using it means installing CTranslate2 to run a model we already call directly (T2.3). | Apache 2.0 | ~3 GB |
 | LLM | ~~Gemma 4 26B-A4B (MoE)~~ **Qwen3.5-9B, 4-bit** (`mlx-community/Qwen3.5-9B-4bit`) — reversed on correctness (DECISION.md) and again on capacity (§3.0) | Apache 2.0 | ~5 GB |
 | TTS | **VOICEVOX Engine**, speaker **id 13 (青山龍星)** — a §6.1 dependency, not a preference | Free (per-character terms) | ~0.3 GB |
 | G2P / accent truth | **pyopenjtalk** | Modified BSD | small |
@@ -71,19 +71,17 @@ VOICEVOX is built on OpenJTalk, which means its pitch accent comes from an expli
 
 Keep **Kokoro-82M as a fallback** for non-pedagogical speech (UI prompts, encouragement lines) where latency matters more than accent precision.
 
-### 2.3 Native client, and why that also reverses the transport — 31 July 2026
+### 2.3 Client: browser now, native iOS post-October — 31 July 2026
 
-**The PWA was not rejected on evidence.** Both T2.1 pre-flight gates passed (`benchmarks/ios-audio.md`): `getUserMedia` works in standalone home-screen mode, and audio output stayed on the headset with the microphone live. The PWA would have worked. It is kept documented and runnable as the fallback for exactly that reason.
+A native SwiftUI client was chosen and then **un-chosen the same day**, before any Swift was written. The argument for it was real: `AVAudioSession` gives explicit category and route control where WebKit only infers them (the pre-flight found the capture device *varies between runs* on the same hardware), plus background audio when the screen locks, plus independence from WebKit media policy — the gates pass on iOS 18.7, which is not a contract for iOS 19.
 
-Native was chosen for three things a browser cannot give:
+**The argument against it is scheduling, and it wins.** A Swift client is a second codebase — `AVAudioEngine`, transport, transcript UI, furigana, barge-in — realistically 3–4 weekends, and it was about to begin *before Phase 2 was finished*, nine weeks from a hard deadline. Free provisioning expires every 7 days with no warning, which is corrosive for a tool whose whole value is daily use. Deferred to Phase 4 (TASKS T4.5).
 
-1. **Explicit audio session control.** `AVAudioSession` category, mode and route are set by the app rather than inferred by WebKit. The pre-flight found the capture device *varies between runs* with the same hardware — the page gets whichever microphone iOS decides to hand it. A native app states its preference and reads back what it actually got.
-2. **Background audio.** A `playAndRecord` session with the background audio mode keeps the conversation alive when the screen locks. A PWA is suspended.
-3. **No dependence on WebKit media policy.** The gates pass on iOS 18.7. They are not a contract for iOS 19.
+Phase 2 therefore develops against a **browser client on the Mac**: no audio-routing quirk, no provisioning, no Tailscale hop, and none of those debugged at the same time as the pipeline. The **iPhone PWA is the shipping target and is unblocked** — both pre-flight gates passed (`benchmarks/ios-audio.md`), so the same client over Tailscale is the delivery path.
 
-**What native does not fix, stated plainly:** iOS cannot pair the built-in microphone with A2DP output. `setPreferredInput(builtInMic)` forces output to the speaker (Apple QA1799, still current). With a headset the app runs HFP duplex in both directions and accepts narrowband audio into the ASR. That quality cost is unmeasured — T2.3 measures it, and the fallback if CER degrades is phone-mic + phone-speaker.
+**The phone's audio constraint is not a client choice.** iOS cannot pair the built-in microphone with A2DP output; `setPreferredInput(builtInMic)` forces output to the speaker (Apple QA1799, still current). A headset means HFP duplex in both directions and narrowband audio into the ASR. Unmeasured — T2.3 measures it, and the fallback is phone mic + phone speaker. Going native would not have changed this.
 
-**The transport reverses with the client.** §5.2's WebRTC advice was written for a browser. A native app hands us PCM buffers directly, and Tailscale (WireGuard) already solves NAT traversal a layer below. What is left of WebRTC's value is jitter buffering and echo cancellation, neither of which pays for SDP negotiation, ICE, and an Opus round-trip on a LAN link. The client streams **16 kHz mono PCM over a WebSocket** into Pipecat's `FastAPIWebsocketTransport`, mounted on the FastAPI app that already serves `POST /turn`. One process, one port, one Tailscale hostname.
+**The transport choice survives the reversal.** WebSocket rather than WebRTC, even with a browser client. `getUserMedia` plus an `AudioWorklet` hands the page PCM directly, and Tailscale (WireGuard) already solves NAT traversal a layer below. What is left of WebRTC's value is jitter buffering and echo cancellation, neither of which pays for SDP negotiation, ICE, and an Opus round-trip on a LAN link. The client streams **16 kHz mono PCM over a WebSocket** into Pipecat's `FastAPIWebsocketTransport`, mounted on the FastAPI app that already serves `POST /turn`. One process, one port, one Tailscale hostname. This is also what makes a later native client cheap: the wire format is 40 lines of JSON-and-PCM, not an SDP negotiation.
 
 Cost of the choice: no automatic packet-loss concealment, and echo cancellation becomes the client's job (`AVAudioSession` `.voiceChat` mode provides it). Both are acceptable on a link that is a WireGuard tunnel over LAN.
 
@@ -176,7 +174,7 @@ Workable. Two rules:
 ## 5. The conversation loop
 
 ```
-iPhone app (AVAudioEngine mic tap)
+Browser (getUserMedia + AudioWorklet) — Mac in Phase 2, iPhone PWA to ship
    │ WebSocket / 16 kHz mono PCM, over Tailscale
    ▼
 Pipecat pipeline ── FastAPIWebsocketTransport
@@ -196,7 +194,7 @@ Pipecat pipeline ── FastAPIWebsocketTransport
    └─ VOICEVOX ────────────► first audio packet   (~200ms after first sentence)
         │
         ▼
-   iPhone app (AVAudioPlayerNode) ─► headset
+   Browser playback ─► headset
 ```
 
 ### 5.1 Latency budget
@@ -351,7 +349,7 @@ Sequenced so that each phase is independently useful if you stop there.
 
 **Phase 1 — Text loop (1 weekend).** FastAPI + MLX + SQLite + py-fsrs. Typed input, typed output, no audio. Proves the Context Builder and grammar firewall.
 
-**Phase 2 — Voice loop (2–3 weekends).** Pipecat over WebSocket, VAD, whisper, VOICEVOX, sentence chunking, plus the native iOS client (§2.3). Target: G1a always, G1b p50 ≤ 3.2 s. This is where the latency work lives, and the client is now part of the phase rather than a thin wrapper on it.
+**Phase 2 — Voice loop (2–3 weekends).** Pipecat over WebSocket, VAD, whisper, VOICEVOX, sentence chunking, plus the browser client (§2.3). Target: G1a always, G1b p50 ≤ 3.2 s. This is where the latency work lives, and the client is now part of the phase rather than a thin wrapper on it.
 
 **Phase 3 — Pronunciation (post-October 2026).** Alignment-free GOP + pyworld + comparative DTW accent scorer against a VOICEVOX reference. Feed scores into FSRS grading, with the accent cap disabled until T3.6 validates the reference. Deferred as a deliberate trade — see PRD §10.
 
