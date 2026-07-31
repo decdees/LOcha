@@ -7,6 +7,38 @@ Deviation for the better: the plan used VOICEVOX-synthesised audio as ASR input 
 
 ---
 
+## T0.9 — cold-boot re-run. The dirty baseline did NOT distort T0.7.
+
+Re-run 15 minutes after a reboot: swapins 2,044, load falling, nothing else heavy resident. Both the shipped model and T0.7's model were measured, because re-running only gemma would measure a configuration no longer shipped, and running only Qwen would lose the apples-to-apples delta.
+
+| run | machine | LLM | p50 | p95 | MLX peak | swapouts *during* the run |
+|---|---|---|---|---|---|---|
+| T0.7 | dirty (~525 MB accumulated swap) | gemma | 2.52 s | 3.25 s | 17.95 GB | +32,892 |
+| **T0.9** | **clean boot** | gemma | **2.49 s** | 3.02 s | 17.95 GB | **+339,984** |
+| **T0.9** | **clean boot** | **Qwen3.5-9B (shipped)** | **3.03 s** | 4.37 s | **8.72 GB** | **0** |
+
+### Finding 1 — T0.7's number was sound. The re-run was still worth doing.
+
+Clean gemma **2.49 s** against dirty gemma **2.52 s**: a 1% difference, well inside run-to-run noise. The accumulated swap did not distort the measurement, so every conclusion drawn from T0.7 stands. That is a negative result, and it is worth having — the alternative was amending a product goal on a number nobody had checked.
+
+### Finding 2 — the shipped config is 0.54 s SLOWER, not the ~0.35 s estimated
+
+Qwen3.5-9B: **3.03 s p50** against gemma's 2.49 s. The LLM switch cost **+0.54 s**, more than the ~350 ms projected from the tok/s ratio alone, because the first-sentence stage carries both TTFT and decode.
+
+That is the real, measured price of the correctness decision (gemma produced `食べるですか`, a conjugation error). Recorded plainly so it can be revisited on evidence rather than remembered as free.
+
+### Finding 3 — gemma is faster in a burst and pushes the machine into swap
+
+The swapout column is the one that was not expected. **gemma caused ~340,000 swapouts during its 8-turn run; Qwen caused zero.** MLX peak 17.95 GB against 8.72 GB — Qwen leaves **9 GB more headroom**.
+
+Eight turns is a burst. NFR-6's 30-minute sustained session is still unmeasured (T2.9), and a model that is already swapping in a burst is the one more likely to degrade over a long session. The throughput advantage gemma was chosen for in the first place may not survive a real session — which would mean the switch to Qwen cost less than 0.54 s in practice, or nothing.
+
+### Finding 4 — ASR is the fixed cost, confirmed
+
+ASR sits at 1.24–1.34 s p50 regardless of which LLM runs beside it. It is the largest single stage and it does not move with anything else in the system.
+
+---
+
 ## Headline
 
 **Voice-to-first-audio: p50 2.52 s, p95 3.25 s.** Adding VAD (~150 ms) and network (~30 ms), still unmeasured: **~2.70 s against PRD G1's 1200 ms.**

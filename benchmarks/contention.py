@@ -32,13 +32,20 @@ HERE = pathlib.Path(__file__).parent
 CORPUS = HERE / "corpus"
 OUT = HERE / "contention.json"
 
+import os
+import sys
+
 ASR = "mlx-community/whisper-large-v3-mlx"
-LLM = "mlx-community/gemma-4-26b-a4b-it-4bit"
+# T0.9: the shipped model changed to Qwen3.5-9B, so the model is now a parameter.
+# Re-running only gemma would measure a configuration that is no longer shipped;
+# running only Qwen would lose the apples-to-apples delta against T0.7's 2.52 s.
+LLM = os.environ.get("OCHA_BENCH_LLM", "mlx-community/Qwen3.5-9B-4bit")
+OUT = pathlib.Path(__file__).parent / f"contention-{LLM.split('/')[-1]}.json"
 
 # Standalone baselines, from asr.md and llm.md.
 BASE_ASR_P50 = 1.25
 BASE_LLM_TTFT = 0.50
-BASE_LLM_TPS = 39.4
+BASE_LLM_TPS = 39.4 if "gemma" in LLM else 20.5
 
 SYSTEM = """You are a Japanese conversation partner. Reply in 1–2 short sentences.
 
@@ -76,6 +83,7 @@ def main() -> None:
 
     sw0 = swap()
     base_rss = rss_gb()
+    print(f"MODEL {LLM}")
     print(f"baseline: all-process RSS {base_rss:.1f} GB, swapins/outs {sw0}\n")
 
     # --- load both, co-resident, and never free either ---
@@ -93,11 +101,15 @@ def main() -> None:
     print(f"             all-process RSS {rss_gb():.1f} GB\n")
 
     cache = make_prompt_cache(model)
+
+    # Prime with a FULL turn, not a system-only message. Qwen's chat template
+    # raises "No user query found in messages" on a system-only render; gemma
+    # tolerated it. Priming with a real turn also matches how the app warms.
     prime = tok.apply_chat_template(
-        [{"role": "system", "content": SYSTEM}],
-        add_generation_prompt=False, tokenize=False, enable_thinking=False,
+        [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "こんにちは。"}],
+        add_generation_prompt=True, tokenize=False, enable_thinking=False,
     )
-    for _ in stream_generate(model, tok, prime, max_tokens=1, prompt_cache=cache):
+    for _ in stream_generate(model, tok, prime, max_tokens=4, prompt_cache=cache):
         pass
 
     # --- warm both, then run turns with BOTH resident ---

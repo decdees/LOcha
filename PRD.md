@@ -27,7 +27,8 @@ The target learner is an absolute beginner in Japanese, aiming at travel and con
 
 | # | Goal | Measure |
 |---|---|---|
-| G1 | Hold a spoken Japanese exchange with sub-1.5s turn latency | p50 voice-to-first-audio < 1200 ms; p95 < 2000 ms |
+| G1a | The conversation never *feels* broken | **No dead air exceeding 500 ms without visible or audible feedback** — transcript appearing, listening state, thinking state |
+| G1b | Turn latency stays within a measured bound | **p50 voice-to-first-audio ≤ 3.2 s; p95 ≤ 4.6 s** — a regression bound, held today. Target ≤ 2.2 s after streaming ASR. See §11. |
 | G2 | Never teach incorrect grammar | 100% of grammar explanations served from curated reference, 0% from model generation |
 | G3 | Measure pitch accent per utterance | Three stable scores per turn: segmental, accent, rhythm. **Deferred post-October 2026 — see §10.** |
 | G4 | Schedule practice from production quality | FSRS rating derived from usage + pronunciation, not self-report |
@@ -142,13 +143,32 @@ Single user, self-hosting. Design parameters that drive functional requirements:
 
 ---
 
+## 7a. G1 restructured — why one number was the wrong shape
+
+The original G1 (p50 < 1200 ms) was written before anything was measured and had no grounding in learner perception. Phase 0 measured **p50 3.03 s** for the shipped configuration on a clean machine (T0.9), so the target was not merely missed but never derived from anything.
+
+Replacing 1200 ms with a different single number would repeat the mistake. G1 is therefore split, because the original conflated two questions that have different answers and different fixes:
+
+**G1a — does it feel broken?** This is the one that decides whether the product is usable, and it is *not* a function of total latency. A silent 3-second gap reads as a crash; 3 seconds with the transcript appearing as you speak, then a visible thinking state, reads as a tutor considering their answer. **G1a is achievable today at the measured 3.03 s**, and it makes the feedback states (T2.8) load-bearing rather than polish.
+
+**G1b — is it getting worse?** A ceiling grounded in measurement:
+
+| | value | basis |
+|---|---|---|
+| p50 ≤ **3.2 s** | measured 3.03 s + 0.18 s (VAD, network) | T0.9, clean boot, shipped config |
+| p95 ≤ **4.6 s** | measured 4.37 s + 0.18 s | T0.9 |
+
+This is a **regression bound, not an aspiration** — it says "do not get worse", and it is the only kind of number Phase 0 can honestly justify. The engineering target of ≤ 2.2 s depends on streaming ASR, which is unbuilt and, after Qwen3-ASR was disqualified in T0.8, no longer available off the shelf. It becomes a commitment when it is measured, not before.
+
+---
+
 ## 8. Success criteria
 
 **Phase 0 is successful if** it produces a written benchmark report with measured CER per ASR candidate and measured tok/s per LLM candidate on this specific machine. No code beyond benchmark scripts.
 
 **Phase 1 is successful if** a scripted 10-turn exchange against `POST /turn` (curl or a test harness — there is no client) keeps vocabulary within the known pool, updates FSRS state correctly, and routes every grammar question through the firewall. Phase 1 is a build-order step, not a shippable state.
 
-**Phase 2 is successful if** p50 voice-to-first-audio is under 1200 ms measured over 50 real turns.
+**Phase 2 is successful if** G1a holds over 50 real turns — no dead air beyond 500 ms without feedback — and p50 voice-to-first-audio stays within the G1b bound. The original "under 1200 ms" criterion is retired: T0.9 measured 3.03 s on the shipped configuration and no combination of built components reaches 1200 ms on this hardware.
 
 **Phase 3 is successful if** accent scores separate deliberately-correct from deliberately-wrong pitch patterns on a hand-built 20-utterance test set. *(Post-October 2026.)*
 

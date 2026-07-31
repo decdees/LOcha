@@ -175,7 +175,14 @@ transcribed this speaker as Hindi, in Devanagari** (`ありがとうございま
 → `अरिगातोगरिमा माता अशिता`). Hindi-accented Japanese trips its language
 classifier. Any multilingual ASR here must have its language forced.
 
-**(b) T0.7 re-run after a cold boot — T0.9. STILL OUTSTANDING — needs a reboot, which is a human action.** The 2.52 s figure was taken on a
+**(b) T0.7 re-run after a cold boot — T0.9. DONE. The dirty baseline did not distort it.**
+
+Clean gemma **2.49 s** against dirty gemma **2.52 s** — a 1% delta, inside run-to-run noise. Every conclusion drawn from T0.7 stands. A negative result, and worth having: the alternative was amending a product goal on a number nobody had checked.
+
+Two things the re-run did surface:
+
+- **The shipped config is 0.54 s slower, not the ~0.35 s estimated.** Qwen 3.03 s vs gemma 2.49 s. That is the measured price of the correctness decision, recorded so it is not remembered as free.
+- **gemma caused ~340,000 swapouts in an 8-turn burst; Qwen caused zero.** MLX peak 17.95 GB vs 8.72 GB. Eight turns is a burst, and NFR-6's 30-minute session is still unmeasured (T2.9) — a model already swapping in a burst is the one more likely to degrade over a session. gemma's throughput advantage may not survive one, which would make the switch cost less than 0.54 s in practice. The 2.52 s figure was taken on a
 machine carrying ~525 MB of accumulated swap from hours of prior benchmarking.
 That is the number a G1 amendment would rest on, and it is not a clean baseline.
 

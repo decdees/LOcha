@@ -78,10 +78,10 @@ Reference documents in this repo:
 - **Why it is now a task, not a gap:** ASR is the dominant latency cost (1250 ms, 5× over budget) and Qwen3-ASR streams natively, which is the top latency lever. **PRD G1 cannot be amended responsibly until this lands.**
 - **Acceptance:** numbers appended to `benchmarks/asr.md`; DECISION.md updated if it wins.
 
-### T0.9 — Cold-boot re-run of T0.7
-- [ ] Reboot, then re-run `benchmarks/contention.py` before anything else loads.
+### T0.9 — Cold-boot re-run of T0.7 ✅
+- [x] Rebooted, re-ran on a 15-minute-old machine, both shipped and prior LLM.
 - **Why:** the 2.52 s figure was taken with ~525 MB of accumulated swap after hours of benchmarking. That number is what a G1 amendment would rest on, so it needs a clean baseline.
-- **Acceptance:** `contention.md` records both figures; the delta between them is the measurement error the earlier run carried.
+- **Acceptance:** `contention.md` records both. ✅ **Clean gemma 2.49 s vs dirty 2.52 s — a 1% delta, so T0.7 was NOT distorted. Shipped Qwen 3.03 s.**
 
 ### T0.6 — Phase 0 report
 - [x] Consolidate into `benchmarks/DECISION.md`: chosen ASR, chosen LLM, and any `ARCHITECTURE.md` revisions required.
