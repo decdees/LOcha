@@ -7,7 +7,7 @@
 
 ## 1. Summary
 
-Ocha is a fully self-hosted, speech-to-speech Japanese conversation tutor. It runs entirely on a single MacBook Pro M4 (32 GB), is accessed from an iPhone PWA over Tailscale, and costs $0/month in recurring fees.
+Ocha is a fully self-hosted, speech-to-speech Japanese conversation tutor. It runs entirely on a single MacBook Pro M4 (32 GB), is accessed from a native iPhone app over Tailscale, and costs $0/month in recurring fees.
 
 It differs from commercial apps (Falou, Duolingo, Speak) on two axes. The **long-term** differentiator is that it measures Japanese pitch accent deterministically and schedules practice against that measurement — deferred to post-October 2026 (§10). What ships before then is spoken production practice against a vocabulary pool the learner has actually earned, with grammar served from curated reference rather than generated, at $0/month. That is not the full thesis, and §10 states the trade plainly.
 
@@ -38,7 +38,7 @@ The target learner is an absolute beginner in Japanese, aiming at travel and con
 
 - Multi-user, authentication, or account management. One user, Tailscale is the perimeter.
 - Kanji writing practice, reading comprehension of long text, JLPT prep.
-- Native mobile app. PWA only.
+- ~~Native mobile app. PWA only.~~ **Reversed, 31 July 2026.** The client is a native SwiftUI app; see FR-9. Not because the PWA failed — both T2.1 pre-flight gates passed (`benchmarks/ios-audio.md`) — but because native gives explicit `AVAudioSession` route and category control, background audio, and independence from WebKit media policy. The PWA stays documented as the proven fallback.
 - Fine-tuning any model.
 - Offline operation on the phone. The Mac must be reachable.
 - Voice cloning or expressive/emotional TTS.
@@ -124,9 +124,12 @@ Single user, self-hosting. Design parameters that drive functional requirements:
   | Accent score below threshold | **PROVISIONAL — disabled by default.** Must not gate scheduling until validated by T3.6. Stubbed and inert through Phases 1–2; the code path and its test exist, the score does not. |
 
 ### FR-9 — Client
-- React PWA, installable to iPhone home screen.
-- Displays: live transcript (user + tutor), furigana on tutor output, pitch accent visualisation after each turn, grammar panel on `[GRAMMAR_QUERY]`.
-- Text input mode available as a fallback *within* the voice-first PWA, for noisy environments and ASR failures. It is not a separate interface and not a Phase 1 deliverable — Phase 1 exposes `POST /turn` and no client.
+- **Native SwiftUI app on iPhone**, sideloaded with a free Apple Developer account. Streams 16 kHz mono PCM to the Mac over a WebSocket on Tailscale.
+- Displays: live transcript (user + tutor), furigana on tutor output, pitch accent visualisation after each turn, grammar panel on `[GRAMMAR_QUERY]`, and an explicit turn-state indicator (listening / transcribing / thinking / speaking) — G1a is a client requirement as much as a server one.
+- Text input mode available as a fallback *within* the voice-first app, for noisy environments and ASR failures. It is not a separate interface and not a Phase 1 deliverable — Phase 1 exposes `POST /turn` and no client.
+- **Accepted operating cost:** a free provisioning profile expires after **7 days**. The app is re-deployed weekly from Xcode (~2 minutes, one command). This was chosen over a paid account deliberately, consistent with G5. It also means the app can never be installed by anyone else, which for a single-user product is not a constraint.
+- **Audio routing is a knowing trade.** iOS cannot combine the built-in microphone with A2DP output; requesting the built-in mic forces output to the speaker. With a headset connected the app uses HFP duplex (headset mic + headset output) and accepts the narrowband quality cost. The alternative — phone mic + phone speaker — remains available and is the fallback if T2.3 finds HFP audio degrades CER.
+- The React PWA (`web/`) is a proven fallback, not a deliverable. See `benchmarks/ios-audio.md`.
 
 ---
 
@@ -192,7 +195,7 @@ This is a **regression bound, not an aspiration** — it says "do not get worse"
 
 ### Why Phase 1 is not a milestone
 
-The product thesis is that text-based Japanese apps are ineffective and that spoken production practice is the entire reason Ocha exists. A text-only Ocha is therefore not a smaller version of the product — it is a rebuild of the thing being rejected. Phase 1 is first in build *order* for one reason: the Context Builder, FSRS rating derivation, and grammar firewall are pure logic, and debugging pure logic through a WebRTC pipeline costs far more than debugging it over curl. It is a step. It does not ship.
+The product thesis is that text-based Japanese apps are ineffective and that spoken production practice is the entire reason Ocha exists. A text-only Ocha is therefore not a smaller version of the product — it is a rebuild of the thing being rejected. Phase 1 is first in build *order* for one reason: the Context Builder, FSRS rating derivation, and grammar firewall are pure logic, and debugging pure logic through a streaming audio pipeline costs far more than debugging it over curl. It is a step. It does not ship.
 
 ### The deliberate trade
 

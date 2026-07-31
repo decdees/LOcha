@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Ocha iOS audio test</title>
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=">
+<style>
+ body{font:16px -apple-system,system-ui;margin:0;padding:16px;background:#111;color:#eee}
+ h1{font-size:18px;margin:0 0 12px}
+ .r{padding:10px;margin:6px 0;border-radius:8px;background:#1c1c1e;border-left:4px solid #555}
+ .ok{border-left-color:#30d158} .bad{border-left-color:#ff453a} .warn{border-left-color:#ffd60a}
+ button{font-size:17px;padding:14px 18px;margin:6px 0;width:100%;border:0;border-radius:10px;
+        background:#0a84ff;color:#fff}
+ button:disabled{background:#333;color:#777}
+ .q{background:#2c2c2e;padding:12px;border-radius:8px;margin:8px 0}
+ .q button{width:48%;display:inline-block;margin-right:2%}
+ code{color:#ffd60a;font-size:13px} #log{white-space:pre-wrap;font:12px ui-monospace;color:#888}
+</style>
+<h1>Ocha — iOS audio test (T2.1)</h1>
+<div id="env"></div>
+<button id="b1">1. Request microphone</button>
+<button id="b2" disabled>2. Play tone WITH mic live</button>
+<div id="out"></div>
+<div id="log"></div>
+<script>
+const $=(s)=>document.querySelector(s), env=$("#env"), out=$("#out"), log=$("#log");
+const say=(t,c="")=>{const d=document.createElement("div");d.className="r "+c;d.innerHTML=t;out.appendChild(d);};
+const note=(t)=>{log.textContent+=t+"\n";};
+
+// --- environment ---------------------------------------------------------
+const standalone = window.navigator.standalone === true ||
+                   window.matchMedia("(display-mode: standalone)").matches;
+const secure = window.isSecureContext;
+env.innerHTML =
+  `<div class="r ${standalone?"ok":"warn"}">Standalone (home screen): <b>${standalone}</b>
+     ${standalone?"":"— add to Home Screen and reopen from there; that is the mode being tested"}</div>
+   <div class="r ${secure?"ok":"bad"}">Secure context: <b>${secure}</b>
+     ${secure?"":"— getUserMedia is BLOCKED without HTTPS. Serve over <code>tailscale serve</code>."}</div>
+   <div class="r">getUserMedia present: <b>${!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)}</b></div>
+   <div class="r">UA: <code>${navigator.userAgent.slice(0,90)}</code></div>`;
+
+let stream=null, ctx=null;
+
+// --- (a) does getUserMedia work in standalone mode? ----------------------
+$("#b1").onclick = async () => {
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true}});
+    const tr = stream.getAudioTracks()[0];
+    say(`(a) getUserMedia <b>WORKS</b> in ${standalone?"standalone":"browser tab"} mode.`,"ok");
+    say(`Track: <code>${tr.label||"(no label)"}</code> settings: <code>${JSON.stringify(tr.getSettings())}</code>`);
+    note("track settings "+JSON.stringify(tr.getSettings()));
+    $("#b2").disabled=false;
+  }catch(e){
+    say(`(a) getUserMedia <b>FAILED</b>: <code>${e.name}: ${e.message}</code>`,"bad");
+    note("getUserMedia error "+e);
+  }
+};
+
+// --- (b) does output stay on AirPods once the mic is live? ---------------
+$("#b2").onclick = async () => {
+  ctx = new (window.AudioContext||window.webkitAudioContext)();
+  await ctx.resume();
+  const o=ctx.createOscillator(), g=ctx.createGain();
+  o.frequency.value=440; g.gain.value=0.25; o.connect(g); g.connect(ctx.destination);
+  o.start(); setTimeout(()=>{o.stop();ctx.close();},2000);
+  say(`Playing a 2-second 440 Hz tone with the microphone OPEN.
+       <div class="q"><b>Where did it come from?</b><br>
+       <button onclick="verdict(true)">AirPods</button>
+       <button onclick="verdict(false)">Phone speaker</button></div>`,"warn");
+  note("sampleRate "+ctx.sampleRate+" state "+ctx.state);
+};
+
+window.verdict = (airpods) => {
+  if(airpods){
+    say(`(b) Output stayed on the <b>headset</b>. No routing problem — continuous
+         listening is viable as designed.`,"ok");
+  } else {
+    say(`(b) <b>OUTPUT FORCED TO PHONE SPEAKER.</b> This is structural, not cosmetic:
+         private practice is impossible, and the tutor's voice feeds back into the
+         open mic during barge-in. <b>Stop and report before building the pipeline.</b>`,"bad");
+  }
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  say("Mic released. Screenshot this page and send it back.");
+};
+</script>

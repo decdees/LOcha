@@ -9,6 +9,9 @@ dependencies = [
     "fugashi>=1.5.2",
     "mlx>=0.32.0",
     "mlx-lm>=0.31.3",
+    # websocket, not webrtc: the client is native and hands us PCM directly, and
+    # Tailscale already solves NAT traversal. ARCHITECTURE §2.3.
+    "pipecat-ai[silero,websocket,mlx-whisper]>=1.6.0",
     "unidic-lite>=1.0.8",
     "uvicorn>=0.52.0",
 ]
@@ -28,6 +31,7 @@ dev = [
     "httpx2>=2.9.1",
     "mypy>=2.3.0",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.16.0",
 ]
 
@@ -76,3 +80,4 @@ testpaths = ["tests"]
 # only appeared when the real model ran behind the real transport.
 addopts = "-q -m 'not slow'"
 markers = ["slow: loads the real model; excluded from the default run"]
+asyncio_mode = "auto"

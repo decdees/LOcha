@@ -13,18 +13,18 @@ Reference documents in this repo:
 
 > **Why this phase exists.** Every model choice in `ARCHITECTURE.md` is a hypothesis based on published benchmarks, not measurements on this machine with this user's voice. Building on unverified assumptions is the single most expensive mistake available here. Phase 0 costs one evening and can invalidate half the architecture.
 
-### T0.1 — Hardware identification
+### T0.1 — Hardware identification ✅
 - [x] Record chip variant (`sysctl -n machdep.cpu.brand_string`), core counts, and measured memory bandwidth.
 - **Why it matters:** base M4 (~120 GB/s) vs M4 Pro (~273 GB/s) is a >2x gap that decides whether a dense model is viable at all.
 - **Acceptance:** `benchmarks/hardware.md` states the variant and measured bandwidth. ✅ **Base M4, 103.2 GB/s measured.**
 
-### T0.2 — Voice sample corpus
+### T0.2 — Voice sample corpus ✅
 - [x] Recording kit delivered: `record.py` (device pinned, level-guarded, resumable), `transcripts.json` (20 entries, ground truth pre-filled), `CHECKLIST.md`. **Awaiting the user's recording session.**
 - [x] 10 pure Japanese, 10 deliberately code-switched Japanese/English — sentences authored, covering ん, geminate っ, long ー, katakana, counters, and fillers えーと/あの/えっと.
 - [x] Ground truth pre-filled (sentences authored before recording, so truth is known in advance). `record.py` prompts per take and writes back any deviation.
 - **Acceptance:** `benchmarks/corpus/` with 20 WAVs and `transcripts.json`.
 
-### T0.3 — ASR bake-off
+### T0.3 — ASR bake-off ✅
 - [x] Benchmark on the T0.2 corpus: `kotoba-whisper-v2.0`, `kotoba-whisper-bilingual-v1.0`, `whisper-large-v3`.
 - [x] Report CER (overall, pure-JA subset, code-switched subset) and wall-clock latency per utterance.
 - **Why bilingual is included:** a beginner code-switches constantly, and the Japanese-only model degrades badly on that input.
@@ -44,7 +44,7 @@ Reference documents in this repo:
 
 - **Acceptance:** `benchmarks/asr.md` with the Stage 1 per-utterance outputs, the Stage 2 table, and a stated recommendation naming an exact HF repo ID.
 
-### T0.4 — LLM bake-off
+### T0.4 — LLM bake-off ✅
 - [x] Benchmark via MLX: `mlx-community/gemma-4-26b-a4b-it-4bit` and `mlx-community/Qwen3.5-9B-4bit`. ~~plus `qwen3.5:27b` **only if** T0.1 shows M4 Pro-class bandwidth~~ — **T0.1 resolved: base M4 at 103.2 GB/s, so `qwen3.5:27b` is skipped** (6.9 tok/s ceiling).
 - [x] Measure: cold load time, time-to-first-token, sustained tok/s, resident memory at 8k context.
 - [x] Derive effective bandwidth (`bytes_per_token × tok/s`) and compare against T0.1's measured 103.2 GB/s. MoE expert routing scatters reads, so a shortfall against the 46.9 tok/s ceiling is expected — quantify it.
@@ -83,7 +83,7 @@ Reference documents in this repo:
 - **Why:** the 2.52 s figure was taken with ~525 MB of accumulated swap after hours of benchmarking. That number is what a G1 amendment would rest on, so it needs a clean baseline.
 - **Acceptance:** `contention.md` records both. ✅ **Clean gemma 2.49 s vs dirty 2.52 s — a 1% delta, so T0.7 was NOT distorted. Shipped Qwen 3.03 s.**
 
-### T0.6 — Phase 0 report
+### T0.6 — Phase 0 report ✅
 - [x] Consolidate into `benchmarks/DECISION.md`: chosen ASR, chosen LLM, and any `ARCHITECTURE.md` revisions required.
 - [x] State plainly in the body, not a footnote: `ARCHITECTURE.md` §2.1's justification for a Japanese-specialised ASR over a generalist audio LLM was **never tested**, because Gemma 4 E4B audio was excluded from T0.3. Open assumption, not a validated finding.
 - [x] Record as a Phase 2 design constraint: `src/ocha/speech/asr.py` takes the model as a **config value** so swapping it is a config edit, not a code change. No runtime-swappable plugin interface.
@@ -151,7 +151,7 @@ Reference documents in this repo:
 - **Acceptance:** 10-turn integration test asserts FSRS state evolves; plus HTTP-level tests. ✅ **118 tests green. Live: p50 1.14 s over 6 turns, firewall fired on both grammar questions, 0 unauthored misses.**
 
 ### T1.9 — *(deleted)* Minimal PWA
-Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice-first, as T2.7. See PRD §10.
+Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, voice-first, as T2.7 — now a native iOS app rather than a PWA. See PRD §10 and ARCHITECTURE §2.3.
 
 ### T1.10 — No-network test ✅
 - [x] `src/ocha/net_guard.py` intercepts `socket.connect`/`connect_ex` and refuses anything outside loopback and the Tailscale CGNAT range (100.64.0.0/10).
@@ -164,22 +164,32 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice
 
 ## Phase 2 — Voice loop *(in scope)*
 
-### T2.1 — Pipecat scaffold, pinned version, WebRTC transport
-- [ ] ~~`SmallWebRTCTransport` had a choppy-audio regression around v0.0.62 — pin a version that sounds correct.~~ **STALE (July 2026 check).** Pipecat is now **1.6.0**; that warning describes the 0.0.x series, two major versions back. Still verify audio quality on day one, but the pin advice no longer applies as written.
+### T2.1 — Pipecat scaffold, pinned version, WebSocket transport
+- [x] **Pre-flight audio test done — BOTH GATES PASS.** (b) Output stayed on the AirPods with the mic live; iOS did *not* force the built-in speaker. (a) `getUserMedia` works in standalone home-screen mode. Continuous listening is viable as designed. `benchmarks/ios-audio.md`.
+- [x] ~~`SmallWebRTCTransport` had a choppy-audio regression around v0.0.62 — pin a version that sounds correct.~~ **DOUBLY MOOT.** Pipecat is now **1.6.0** (that warning describes the 0.0.x series), and the transport is no longer WebRTC — see ARCHITECTURE §2.3.
 - [ ] **Pipecat 1.0 restructured the API.** Services take submodule imports (`pipecat.services.X` → `pipecat.services.X.llm`); transports moved out of `services/`; provider-specific contexts are replaced by a universal `LLMContext`; `on_client_close` → `on_client_disconnected`. Most relevant here: **VAD config moved off transport params onto `LLMUserAggregatorParams.vad_analyzer`**, which changes T2.2.
 - [ ] **`pipecat-ai[mlx-whisper]` exists** — first-class MLX Whisper support, i.e. exactly the T0.3 choice. Also `[silero]`, `[webrtc]`, `[local]`, `[local-smart-turn]`. The ASR integration is likely a config, not a custom service.
+- [ ] **`PipelineTask`/`PipelineRunner` are deprecated** (Pipecat 1.3, removed at 2.0) in favour of `PipelineWorker`/`WorkerRunner`. Using the new pair. Note `WorkerRunner.add_workers` is a **coroutine** despite the name — calling it unawaited is a silent no-op and the runner then blocks forever with no workers, which presents as a transport hang.
 - [ ] **VOICEVOX has no Pipecat service** — write a custom TTS service against its local HTTP API (`/audio_query` then `/synthesis`, both already exercised in T0.7).
-- [ ] **Emit `TurnState` transitions from the pipeline** (`src/ocha/turnstate.py`). Not optional: PRD G1a is asserted against them, and retrofitting the events through five components later is the expensive path.
+- [x] **Instrumentation built FIRST, before any real `FrameProcessor`.** `src/ocha/speech/probe.py` — `TurnStateProbe` is a pass-through tap that maps frames to `TurnState` and times the §5.1 stages. A test asserts it never buffers or reorders, which is §5.2's named worst failure.
+- [x] **Pipecat 1.6.0 installed** with `[webrtc,silero]`. API confirmed against the running library rather than the migration guide.
+- [x] **`FastAPIWebsocketTransport` mounted on the existing FastAPI app**, `/ws`, 16 kHz mono PCM in and out. The client is native (§2.3), so the serializer is ours to choose: use Pipecat's protobuf serializer only if the Swift side stays trivial, otherwise a minimal framing of raw PCM + JSON control messages. **Chose ours** (`speech/wire.py`): protobuf would put SwiftProtobuf and a generated `frames_pb2` mirror on the client for a format we own both ends of.
+- [x] Pipeline assembled: `transport.input() → VAD → ASR → context/LLM → chunker → TTS → transport.output()`, with `TurnStateProbe` tapped once, immediately before `transport.output()`. **Loopback first, not stubs:** the pipeline today is `input -> loopback -> probe -> output`, which is the day-one audio test rather than scaffolding — it answers whether HFP audio survives the round trip, by ear, before ASR exists to blame.
+- [ ] Wired to a live connection (needs Tailscale for the phone).
 
 ### T2.2 — silero-vad endpointing and barge-in
 ### T2.3 — ASR service wrapping the Phase 0 choice
+- [ ] **Re-measure CER through the production audio path — and through BOTH capture devices.** The T2.1 pre-flight found the input device is not stable: two runs on the same phone with the same headset connected gave `AirPods` and `iPhone Microphone` respectively. The corpus characterises the MacBook's built-in mic, which is neither of them. The T0.2 corpus was recorded on the MacBook's built-in mic, so `2.56` describes an input path the product will never see. Re-record part of the corpus through AirPods → iPhone → transport → ASR and re-score with the same pre-registered rules. See `benchmarks/ios-audio.md`.
 ### T2.4 — Streaming LLM into a sentence chunker (split on 。！？)
 ### T2.5 — VOICEVOX service, synthesis per sentence
 ### T2.6 — End-to-end latency instrumentation
 
-### T2.7 — PWA, voice-first *(absorbs the deleted T1.9)*
-- [ ] React PWA: continuous-listening voice UI, live transcript (user + tutor), furigana on tutor output, grammar panel on `[GRAMMAR_QUERY]`. Text input as a fallback mode, not the primary interface.
-- [ ] Installable to iOS home screen; reachable over Tailscale.
+### T2.7 — Native iOS client, voice-first *(absorbs the deleted T1.9 and T2.8's UI)*
+- [ ] SwiftUI app in `ios/`: continuous-listening voice UI, live transcript (user + tutor), furigana on tutor output, grammar panel on `[GRAMMAR_QUERY]`. Text input as a fallback mode, not the primary interface.
+- [ ] `AVAudioSession` `.playAndRecord` + `.voiceChat`, `.allowBluetooth`. **Log the resolved input route on every session start** — the pre-flight showed iOS picks the capture device unpredictably, and the native app must at least *observe* what it got even where it cannot dictate it.
+- [ ] `AVAudioEngine` tap → 16 kHz mono PCM → `URLSessionWebSocketTask` to `wss://<mac>/ws`. Playback through `AVAudioPlayerNode`; barge-in stops playback on the server's user-started-speaking signal.
+- [ ] Free-account signing; reachable over Tailscale.
+- **Not doing:** the PWA. It passed its gates and stays in `web/` as the documented fallback — see `benchmarks/ios-audio.md` and PRD FR-9.
 - [ ] Pitch-accent visualisation is a Phase 3 slot — leave the panel space, ship nothing in it.
 - **Acceptance:** the user completes a 10-turn *spoken* exchange from an iPhone.
 
@@ -190,6 +200,12 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice
 - **Why this is not polish:** the restructured G1 makes "no dead air beyond ~500 ms without visible or audible feedback" a first-class criterion. At a measured 2.5 s voice-to-first-audio, feedback is what decides whether the app feels broken or merely deliberate. A silent 2.5 s gap reads as a crash; a 2.5 s gap with a live transcript reads as listening.
 - **Acceptance:** no state in a real turn leaves the user without feedback for more than 500 ms.
 
+### T2.10 — Weekly re-deploy workflow *(new — the cost of free-account signing)*
+- [ ] `make ios-deploy` → one `xcodebuild` build-and-install against the connected phone.
+- [ ] README section: the 7-day ritual, plus the one-time prerequisites (`sudo xcode-select -s /Applications/Xcode.app`, Apple ID in Xcode, Developer Mode on the phone, trust the certificate).
+- **Why a task and not a footnote:** a free provisioning profile expires after 7 days. An undocumented manual ritual is the kind of thing that silently ends a side project in week three.
+- **Acceptance:** the app is re-installed from a cold start in under 5 minutes using only what the README says.
+
 ### T2.9 — NFR-6 thermal soak
 - [ ] 30-minute sustained session; assert p50 latency degrades by less than 20%.
 - **Why here and not Phase 0:** a sustained-session test only means anything once there is a session to sustain. Every Phase 0 figure came from short bursts.
@@ -197,7 +213,7 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice
 
 > **The single biggest failure mode:** breaking the streaming chain with a buffering `FrameProcessor` or a non-streaming HTTP TTS call. Every service downstream of the LLM must consume `TextFrame` as it arrives. Audit this before optimising anything else.
 
-- **Gate:** p50 voice-to-first-audio < 1200 ms over 50 real turns.
+- **Gate:** G1a holds over 50 real spoken turns from the phone (no state without feedback for >500 ms), and p50 voice-to-first-audio is within G1b's 3.2 s bound. ~~< 1200 ms~~ — retired with G1, see PRD §7a.
 
 ---
 

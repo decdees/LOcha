@@ -10,12 +10,13 @@ rather than a slow path.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
 from ocha.db import connect, migrate
@@ -140,6 +141,21 @@ async def turn(req: TurnRequest) -> TurnResponse:
         ratings=result.ratings,
         usage=result.usage,
     )
+
+
+@app.websocket("/ws")
+async def ws(websocket: WebSocket) -> None:
+    """The voice loop (T2.1). One client, one connection, its whole life.
+
+    `async def` for the same reason /turn is: the pipeline will run MLX inference
+    (whisper, then the LLM) and MLX GPU streams are thread-local to whichever
+    thread ran `load()`. Standing constraint 6.
+    """
+    await websocket.accept()
+    from ocha.speech.pipeline import run_session
+
+    probe = await run_session(websocket)
+    logging.getLogger(__name__).info("ws session ended: %s", probe.report())
 
 
 @app.get("/health")

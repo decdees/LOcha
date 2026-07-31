@@ -16,6 +16,8 @@ Both are Apache-2.0 and run entirely locally.
 
 ### Required configuration, not optional
 
+- **TTS speaker: VOICEVOX id 13 (青山龍星, adult male).** Recorded here as a **Phase 3 dependency, not a UI preference**. VOICEVOX output is the DTW reference for ARCHITECTURE §6.1's comparative accent scorer, and an octave gap between reference and learner degrades alignment quality even after F0 normalisation. Secondary: the learner internalises this voice's prosody, so the reference register must be one they can reproduce. Alternative if a second voice is wanted: id 11 (玄野武宏). **Any benchmark that used id 3 (ずんだもん) as a reference must be re-run.**
+
 - **ASR:** `no_repeat_ngram_size=4`. Without it large-v3 degenerates on some utterances into hundreds of repetitions — 557 insertions and 70 s on a single 4.9 s clip.
 - **ASR:** clear `generation_config.forced_decoder_ids` before passing `language`/`task`. In transformers 5.x the config silently overrides the kwargs. (MLX runtime is unaffected; this applies if the transformers path is ever used.)
 - **LLM:** **KV-cache reuse across turns is an architectural requirement, not an optimisation.** Without it, TTFT p50 is 1.81 s and *grows every turn*; with it, 0.50 s and flat.

@@ -17,6 +17,13 @@ which is what the product actually receives.
 VOICEVOX runs as a separate CPU process on :50021, so it contends for CPU rather
 than GPU -- a different resource from ASR and LLM, which is why §4 could plausibly
 assume all three coexist.
+
+Speaker 13 (青山龍星, adult male), NOT speaker 3 (ずんだもん). This is a Phase 3
+dependency, not a voice preference: VOICEVOX output is the DTW reference for
+§6.1's comparative accent scoring, and an octave gap between reference and
+learner degrades alignment quality even after normalisation. Secondary reason,
+also not aesthetic: the learner internalises this voice's prosody, and a register
+an adult male should not reproduce is the wrong model to internalise.
 """
 
 from __future__ import annotations
@@ -148,12 +155,12 @@ def main() -> None:
         import urllib.parse, urllib.request
         t = time.perf_counter()
         q = urllib.request.urlopen(urllib.request.Request(
-            f"http://127.0.0.1:50021/audio_query?text={urllib.parse.quote(first_sent)}&speaker=3",
+            f"http://127.0.0.1:50021/audio_query?text={urllib.parse.quote(first_sent)}&speaker=13",
             method="POST"), timeout=60).read()
         t_query = time.perf_counter() - t
         t = time.perf_counter()
         wav = urllib.request.urlopen(urllib.request.Request(
-            "http://127.0.0.1:50021/synthesis?speaker=3", data=q,
+            "http://127.0.0.1:50021/synthesis?speaker=13", data=q,
             headers={"Content-Type": "application/json"}, method="POST"), timeout=60).read()
         t_synth = time.perf_counter() - t
         t_tts = t_query + t_synth
@@ -198,7 +205,7 @@ def main() -> None:
         "asr": ASR, "llm": LLM, "rows": rows,
         "mlx_peak_gb": round(peak, 2), "all_process_rss_gb": round(rss_gb(), 1),
         "swap_before": sw0, "swap_after": sw1,
-        "voicevox": "0.25.2 CPU, speaker=3, separate process on :50021",
+        "voicevox": "0.25.2 CPU, speaker=13, separate process on :50021",
     }, ensure_ascii=False, indent=2) + "\n")
 
 

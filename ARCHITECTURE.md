@@ -8,7 +8,7 @@
 Three things invalidate parts of the earlier plan:
 
 1. **Model generation turned over.** Qwen3-30B-A3B is a generation behind. As of mid-2026 the relevant open-weight families are **Gemma 4** (released 31 Mar 2026), **Qwen 3.5**, and **Qwen 3.6**. All Apache 2.0.
-2. **Memory bandwidth, not memory capacity, is the binding constraint** on an M4 laptop. This forces a Mixture-of-Experts model. See §3.
+2. ~~**Memory bandwidth, not memory capacity, is the binding constraint** on an M4 laptop. This forces a Mixture-of-Experts model.~~ **FALSIFIED — see §3.0.** True for a model measured alone; false for the system. Once whisper, VOICEVOX and macOS are co-resident, **capacity binds first**, and the MoE's ~15 GB footprint is what breaks it.
 3. **Gemma 4 accepts audio natively** (25 tokens/sec of audio, 30s clips, 16 kHz mono). This does *not* replace the ASR stage, but it enables a genuinely useful offline grader. See §6.3.
 
 ---
@@ -19,8 +19,8 @@ Three things invalidate parts of the earlier plan:
 |---|---|
 | Budget | $0/month recurring. One-time downloads only. |
 | Hardware | MacBook Pro M4, 32 GB unified memory |
-| Client | React PWA on iPhone, over Tailscale |
-| Target turn latency | < 1.2s p50 voice-to-first-audio |
+| Client | Native SwiftUI app on iPhone, over Tailscale (~~React PWA~~ — reversed 31 July 2026, §2.3) |
+| Target turn latency | ~~< 1.2s p50~~ **G1a: no dead air >500 ms without feedback; G1b: p50 ≤ 3.2 s** (PRD §7a) |
 | Blocking schedule risk | Hard external deadline, October 2026 |
 | Pedagogical anchor | Falou-style drilling + free conversation, FSRS-scheduled |
 
@@ -33,11 +33,11 @@ Three things invalidate parts of the earlier plan:
 | Layer | Choice | License | Footprint (4-bit / runtime) |
 |---|---|---|---|
 | Orchestration | **Pipecat** (BSD-2) | Free | negligible |
-| Transport | WebRTC (`SmallWebRTCTransport`) | — | — |
+| Transport | ~~WebRTC (`SmallWebRTCTransport`)~~ **WebSocket** (`FastAPIWebsocketTransport`), 16 kHz mono PCM — reversed with the client, §2.3 | — | — |
 | VAD / turn detection | **silero-vad** + Pipecat smart-turn | MIT | ~50 MB |
 | ASR | ~~kotoba-whisper-v2.0~~ **whisper-large-v3 on MLX** (`mlx-community/whisper-large-v3-mlx`) — **T0.3 REVERSED this**, see §2.1 | Apache 2.0 | ~3 GB |
-| LLM | **Gemma 4 26B-A4B** (MoE, 3.8B active) | Apache 2.0 | ~14–15 GB |
-| TTS | **VOICEVOX Engine** | Free (per-character terms) | ~1 GB |
+| LLM | ~~Gemma 4 26B-A4B (MoE)~~ **Qwen3.5-9B, 4-bit** (`mlx-community/Qwen3.5-9B-4bit`) — reversed on correctness (DECISION.md) and again on capacity (§3.0) | Apache 2.0 | ~5 GB |
+| TTS | **VOICEVOX Engine**, speaker **id 13 (青山龍星)** — a §6.1 dependency, not a preference | Free (per-character terms) | ~0.3 GB |
 | G2P / accent truth | **pyopenjtalk** | Modified BSD | small |
 | Segmental scoring | **wav2vec2-xlsr-53-espeak-cv-ft** — alignment-free GOP, 387 phonetic labels | Apache 2.0 | ~1.3 GB fp32 / ~0.7 GB fp16 |
 | Pitch extraction | **pyworld** / **parselmouth** | — | small |
@@ -71,11 +71,48 @@ VOICEVOX is built on OpenJTalk, which means its pitch accent comes from an expli
 
 Keep **Kokoro-82M as a fallback** for non-pedagogical speech (UI prompts, encouragement lines) where latency matters more than accent precision.
 
+### 2.3 Native client, and why that also reverses the transport — 31 July 2026
+
+**The PWA was not rejected on evidence.** Both T2.1 pre-flight gates passed (`benchmarks/ios-audio.md`): `getUserMedia` works in standalone home-screen mode, and audio output stayed on the headset with the microphone live. The PWA would have worked. It is kept documented and runnable as the fallback for exactly that reason.
+
+Native was chosen for three things a browser cannot give:
+
+1. **Explicit audio session control.** `AVAudioSession` category, mode and route are set by the app rather than inferred by WebKit. The pre-flight found the capture device *varies between runs* with the same hardware — the page gets whichever microphone iOS decides to hand it. A native app states its preference and reads back what it actually got.
+2. **Background audio.** A `playAndRecord` session with the background audio mode keeps the conversation alive when the screen locks. A PWA is suspended.
+3. **No dependence on WebKit media policy.** The gates pass on iOS 18.7. They are not a contract for iOS 19.
+
+**What native does not fix, stated plainly:** iOS cannot pair the built-in microphone with A2DP output. `setPreferredInput(builtInMic)` forces output to the speaker (Apple QA1799, still current). With a headset the app runs HFP duplex in both directions and accepts narrowband audio into the ASR. That quality cost is unmeasured — T2.3 measures it, and the fallback if CER degrades is phone-mic + phone-speaker.
+
+**The transport reverses with the client.** §5.2's WebRTC advice was written for a browser. A native app hands us PCM buffers directly, and Tailscale (WireGuard) already solves NAT traversal a layer below. What is left of WebRTC's value is jitter buffering and echo cancellation, neither of which pays for SDP negotiation, ICE, and an Opus round-trip on a LAN link. The client streams **16 kHz mono PCM over a WebSocket** into Pipecat's `FastAPIWebsocketTransport`, mounted on the FastAPI app that already serves `POST /turn`. One process, one port, one Tailscale hostname.
+
+Cost of the choice: no automatic packet-loss concealment, and echo cancellation becomes the client's job (`AVAudioSession` `.voiceChat` mode provides it). Both are acceptable on a link that is a WireGuard tunnel over LAN.
+
 ---
 
-## 3. The bandwidth problem — read this before picking a model
+## 3. The bandwidth problem — SUPERSEDED. Read §3.0 first.
 
-LLM token generation is memory-bandwidth bound, not compute bound. On Apple Silicon this decides everything.
+### 3.0 What this section got wrong
+
+**This section's headline argument is falsified.** It reasons that memory *bandwidth* is the binding constraint, concludes that a Mixture-of-Experts model is therefore mandatory, and recommends Gemma 4 26B-A4B. The reasoning is sound for a model measured **alone**. It does not survive the model being measured **alongside everything else that has to run**.
+
+Measured in T0.9, both models co-resident with whisper-large-v3, VOICEVOX and macOS:
+
+| model | weights | MLX peak | swapouts in an 8-turn burst |
+|---|---|---|---|
+| Gemma 4 26B-A4B (the MoE this section recommends) | 14.2 GB | 17.95 GB | **~340,000** |
+| Qwen3.5-9B (dense, the model this section ranks second) | 5.0 GB | 8.72 GB | **0** |
+
+**Once the full loop is resident, capacity binds before bandwidth does, and the MoE's ~15 GB footprint is what breaks it.** §3 optimised the one constraint it measured and pushed the system into the one it did not.
+
+**The MoE recommendation was wrong for this machine.** Not because the bandwidth arithmetic below is incorrect — it is correct, and T0.1 confirmed its figures — but because it was derived from a single-component measurement and presented as a system-level conclusion.
+
+**What remains unmeasured, stated so this correction is not itself overclaimed:** Gemma was still *faster* end to end (2.49 s vs 2.53–3.03 s) despite the swapping. The latency cost of that swap traffic has not been demonstrated — it would show up in a sustained session, which is T2.9's 30-minute soak. So the honest claim is that the *reasoning* was wrong and the risk is real, not that the swapping has already been shown to hurt. If T2.9 shows no degradation, the MoE becomes a live option again on a machine with more headroom.
+
+The LLM choice was separately reversed to Qwen3.5-9B on **correctness** grounds (see `benchmarks/DECISION.md`); the capacity finding is a second, independent reason the same way.
+
+### 3.1 The bandwidth arithmetic, which is still correct
+
+LLM token generation is memory-bandwidth bound, not compute bound. On Apple Silicon this decides everything **about a model in isolation**.
 
 | Chip | Approx. bandwidth |
 |---|---|
@@ -93,14 +130,16 @@ LLM token generation is memory-bandwidth bound, not compute bound. On Apple Sili
 >
 > **But tok/s is not constant with context, which this section assumes throughout.** gemma falls from 37.7 tok/s at 256 tokens to **14.3 at 8k**. At 8k the MoE advantage is nearly gone. It wins decisively at the lengths this product uses (a 10-turn tutor conversation measured 560 tokens). See `benchmarks/llm.md`.
 
-> **~~Action item~~ RESOLVED by T0.1.** Base M4, 10-core, 32 GB. Measured 103.2 GB/s. **MoE is mandatory**; dense 27B is not viable. §3.1 option 4 is struck, and T0.4 skips `qwen3.5:27b`.
+> **~~Action item~~ RESOLVED by T0.1.** Base M4, 10-core, 32 GB. Measured 103.2 GB/s. **MoE is mandatory**; dense 27B is not viable. §3.2 option 4 is struck, and T0.4 skips `qwen3.5:27b`.
 
-### 3.1 Model shortlist, in preference order
+### 3.2 Model shortlist, in preference order
 
 1. **Gemma 4 26B-A4B** — best active-parameter efficiency available; 3.8B active. Default pick on base M4.
 2. **Qwen 3.5 9B** — dense, small, and Qwen 3.5 has the strongest Japanese of the open families (201 languages, top-tier JA/KO/ZH). Fastest to first token. Weaker at grammar explanation.
 3. **Qwen 3.6 35B-A3B** — 3B active, excellent speed, but ~19 GB at 4-bit leaves almost nothing for whisper + VOICEVOX + macOS. Only if you drop to a smaller ASR.
 4. ~~**Qwen 3.5 27B dense** — M4 Pro only. Best Japanese quality of the four.~~ **STRUCK by T0.1** — this machine is a base M4 at a measured 103.2 GB/s, giving a 6.9 tok/s ceiling. Not viable.
+
+> **Ordering superseded by §3.0.** This list ranks by throughput, which is the wrong axis once the whole loop is resident. Item 2 (Qwen 3.5 9B) is the shipped choice: it is slower and it is the only one that leaves the system enough headroom not to swap.
 
 **Known gotcha:** Ollama had an `unknown model architecture: 'qwen35moe'` bug (filed Mar 2026) affecting Qwen 3.5 MoE variants with separate vision projectors. Not directly your path, but a signal — verify your exact artifact loads before building around it. LM Studio moved to an MLX backend and is a lower-friction alternative for Mac.
 
@@ -137,25 +176,27 @@ Workable. Two rules:
 ## 5. The conversation loop
 
 ```
-iPhone PWA (mic)
-   │ WebRTC / Opus, over Tailscale
+iPhone app (AVAudioEngine mic tap)
+   │ WebSocket / 16 kHz mono PCM, over Tailscale
    ▼
-Pipecat pipeline ── SmallWebRTCTransport
+Pipecat pipeline ── FastAPIWebsocketTransport
+   │
+   ├─ TurnStateProbe ──────► timeline for G1a  (tap, passes frames through)
    │
    ├─ silero-vad ──────────► endpoint detected (~150ms after speech end)
    │
-   ├─ kotoba-whisper-v2.0 ─► transcript          (~250ms for a 5s utterance)
+   ├─ whisper-large-v3 ────► transcript          (1250 ms, T0.3 measured)
    │
    ├─ Context Builder ─────► system prompt + FSRS due items + last N turns
    │
-   ├─ Gemma 4 26B-A4B ─────► streaming TextFrames (first token ~200ms)
+   ├─ Qwen3.5-9B ──────────► streaming TextFrames (first token ~500ms)
    │
    ├─ Sentence Chunker ────► splits on 。！？ boundaries
    │
    └─ VOICEVOX ────────────► first audio packet   (~200ms after first sentence)
         │
         ▼
-   iPhone speaker
+   iPhone app (AVAudioPlayerNode) ─► headset
 ```
 
 ### 5.1 Latency budget
@@ -176,7 +217,9 @@ Pipecat pipeline ── SmallWebRTCTransport
 2. **Chunk TTS by sentence, not by response.** Synthesise 「そうですね。」 while the model is still generating the rest.
 3. **Cap reply length in the system prompt.** One to two sentences. This is both more natural for a tutor and ~3x faster. Enforce it with `max_tokens` too — prompts get ignored.
 
-**Use WebRTC, not WebSockets.** Pipecat's own maintainers recommend it: UDP transport, better interruption handling, better NAT traversal. Caveat: `SmallWebRTCTransport` had a robotic/choppy audio regression starting around v0.0.62 — pin a known-good version and test audio quality on day one rather than debugging it at week three.
+~~**Use WebRTC, not WebSockets.**~~ **Reversed with the client — see §2.3.** The advice was correct for a browser client and does not apply to a native one: WebRTC's NAT traversal is redundant behind Tailscale, and its Opus round-trip is pure cost when the app already holds PCM. The choppy-audio caveat referred to `SmallWebRTCTransport` in the 0.0.x series and is doubly moot — Pipecat is at 1.6.0 and that transport is no longer used.
+
+The three rules above are transport-agnostic and unchanged.
 
 ---
 
@@ -308,11 +351,11 @@ Sequenced so that each phase is independently useful if you stop there.
 
 **Phase 1 — Text loop (1 weekend).** FastAPI + MLX + SQLite + py-fsrs. Typed input, typed output, no audio. Proves the Context Builder and grammar firewall.
 
-**Phase 2 — Voice loop (1–2 weekends).** Pipecat, WebRTC, VAD, whisper, VOICEVOX. Sentence chunking. Target: 1.2s. This is where the latency work lives.
+**Phase 2 — Voice loop (2–3 weekends).** Pipecat over WebSocket, VAD, whisper, VOICEVOX, sentence chunking, plus the native iOS client (§2.3). Target: G1a always, G1b p50 ≤ 3.2 s. This is where the latency work lives, and the client is now part of the phase rather than a thin wrapper on it.
 
 **Phase 3 — Pronunciation (post-October 2026).** Alignment-free GOP + pyworld + comparative DTW accent scorer against a VOICEVOX reference. Feed scores into FSRS grading, with the accent cap disabled until T3.6 validates the reference. Deferred as a deliberate trade — see PRD §10.
 
-**Phase 4 — PWA polish + Gemma audio grader (ongoing).** Offline batch analysis, progress views, streak mechanics.
+**Phase 4 — Client polish + Gemma audio grader (ongoing).** Offline batch analysis, progress views, streak mechanics.
 
 ### 8.1 Schedule reality check
 
@@ -334,7 +377,7 @@ Phase 1 alone is genuinely useful and preserves the option. Phase 2 is where the
 | 1 | ~~Machine is M4 Pro-class bandwidth~~ | **RESOLVED, T0.1.** Base M4, measured 103.2 GB/s (86% of the ~120 spec). MoE mandatory; dense 27B struck. See `benchmarks/hardware.md`. | ~~High~~ — closed |
 | 2 | Gemma 4 26B-A4B is competent at Japanese grammar | 20 hand-written は/が, は/も, transitivity prompts, checked against a reference | **High** |
 | 3 | ~~kotoba-whisper handles *your* accent~~ | **RESOLVED, T0.3: it does not.** 17.09% CER on pure Japanese, disqualified at Stage 1. Replaced by whisper-large-v3 on MLX (2.56%). | ~~Medium~~ — closed |
-| 4 | Pipecat's Mac WebRTC path is stable | Day-one audio quality test, pin version | Medium |
+| 4 | ~~Pipecat's Mac WebRTC path is stable~~ **MOOT, §2.3.** Replaced by: *HFP-duplex headset audio is good enough for whisper.* iOS cannot pair the built-in mic with A2DP output, so a headset means narrowband capture. The corpus was recorded on the MacBook's mic; production CER on HFP audio is unmeasured. Falsify in T2.3 by re-recording ≥10 corpus utterances through the app on both capture paths. | **Medium-High** |
 | 5 | Alignment-free GOP transfers to Japanese | Published results are English and child-speech corpora (speechocean762, CMU Kids). Japanese transfer is **untested**. Validate on 10 deliberately mispronounced utterances before trusting any segmental score. | Medium |
 | 6 | 26 GB budget survives real sessions | T0.7 contention test, then `footprint` during a 20-min session | Medium |
 | 7 | Sustained thermals on a laptop | 30-min session, watch for throttling | Low-Medium |
