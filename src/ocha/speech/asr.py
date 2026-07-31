@@ -58,13 +58,30 @@ LANGUAGE = Language.JA
 #   temperature fallback         -- retries at rising temperature on failure
 #   condition_on_previous_text   -- disabled below, because carrying context
 #                                   across turns is what lets a loop persist
-# No looping was observed across the 8-turn T0.7 and T0.9 runs on this path.
+# **Those guards are not sufficient.** An end-to-end run produced
+# `火が火に火に火に火に...` from a single utterance — T0.3's degenerate repetition,
+# on this backend, with the guards active. Open: the transformers mitigation does
+# not exist here, so the fix has to be either a post-hoc repetition check on the
+# transcript or a different decoding strategy. See benchmarks/voice-loop.md.
 CONDITION_ON_PREVIOUS_TEXT = False
 
 # A VAD segment shorter than this is a click, a breath, or a door. Transcribing
 # it costs a full whisper pass and yields a hallucinated 「ありがとうございました」,
 # which then becomes a conversational turn.
 MIN_SEGMENT_S = 0.3
+
+# Whisper hallucinates confident text on near-silence, and its favourite in
+# Japanese is 「ご視聴ありがとうございました」 ("thank you for watching") — a YouTube
+# sign-off that saturates the training data. Observed twice in an 8-turn
+# end-to-end run, each time on a segment that was mostly silence. Transcripts
+# matching these are dropped: an invented utterance costs a whole turn and teaches
+# the learner that the tutor mishears them.
+HALLUCINATIONS = (
+    "ご視聴ありがとうございました",
+    "ご視聴ありがとうございます",
+    "おやすみなさい",
+    "チャンネル登録",
+)
 
 
 class OchaWhisper(SegmentedSTTService):
@@ -117,6 +134,9 @@ class OchaWhisper(SegmentedSTTService):
         # int16 -> float32 in [-1, 1). Dividing by 32768 rather than 32767 keeps
         # the mapping exact in binary and matches what whisper's own loader does.
         text = await self._transcribe(samples)
+        if any(h in text for h in HALLUCINATIONS):
+            yield None
+            return
         if not text:
             yield None
             return

@@ -21,8 +21,16 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.tests.utils import run_test
 
-from ocha.speech.wire import CHANNELS, SAMPLE_RATE, OchaSerializer, state_message
+from ocha.speech.wire import (
+    CHANNELS,
+    SAMPLE_RATE,
+    ClientText,
+    OchaSerializer,
+    _client_message,
+    state_message,
+)
 
 
 @pytest.fixture
@@ -45,11 +53,36 @@ async def test_audio_out_is_bare_pcm(ser: OchaSerializer) -> None:
     assert out == b"\xff\x00"
 
 
-async def test_transcript_carries_the_final_flag(ser: OchaSerializer) -> None:
-    interim = json.loads(await ser.serialize(InterimTranscriptionFrame("こんに", "u", "t")) or "")
-    final = json.loads(await ser.serialize(TranscriptionFrame("こんにちは", "u", "t")) or "")
-    assert interim == {"type": "transcript", "text": "こんに", "final": False}
-    assert final == {"type": "transcript", "text": "こんにちは", "final": True}
+def test_transcript_carries_the_final_flag() -> None:
+    """Built by `ClientText`, not the serializer -- see the next test for why."""
+    assert _client_message(InterimTranscriptionFrame("こんに", "u", "t")) == {
+        "type": "transcript",
+        "text": "こんに",
+        "final": False,
+    }
+    assert _client_message(TranscriptionFrame("こんにちは", "u", "t")) == {
+        "type": "transcript",
+        "text": "こんにちは",
+        "final": True,
+    }
+    assert _client_message(LLMTextFrame("今日は")) == {"type": "reply", "text": "今日は"}
+
+
+async def test_text_frames_reach_the_client_as_transport_messages() -> None:
+    """The regression test for a bug only an end-to-end run could find.
+
+    Pipecat's output transport serialises audio and transport messages and nothing
+    else, so a TranscriptionFrame arriving at `transport.output()` is silently not
+    sent. The pipeline worked, the tutor spoke, and the client received no
+    transcript at all. `ClientText` converts them; the serializer no longer has a
+    branch for text frames, because that branch was dead code that looked alive.
+    """
+    down, _ = await run_test(
+        ClientText(),
+        frames_to_send=[TranscriptionFrame("こんにちは", "u", "t"), LLMTextFrame("はい。")],
+    )
+    messages = [f.message for f in down if isinstance(f, OutputTransportMessageUrgentFrame)]
+    assert {m["type"] for m in messages} == {"transcript", "reply"}
 
 
 async def test_japanese_is_not_escaped(ser: OchaSerializer) -> None:
@@ -58,7 +91,9 @@ async def test_japanese_is_not_escaped(ser: OchaSerializer) -> None:
     Not cosmetic: every string on this wire is Japanese, and \\u-escaping
     triples the size of the text channel for no benefit.
     """
-    raw = await ser.serialize(LLMTextFrame("今日は"))
+    raw = await ser.serialize(
+        OutputTransportMessageUrgentFrame(message={"type": "reply", "text": "今日は"})
+    )
     assert isinstance(raw, str) and "今日は" in raw
 
 

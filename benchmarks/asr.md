@@ -148,7 +148,15 @@ Recorded because in each case the first run produced a confident, plausible, wro
    >
    > **The decision stands; the margin does not.** A 6.7× gap (2.56 vs 17.09) is far too large to be an artifact of one decoding flag, and the Stage 1 catastrophic-failure gate disqualified both kotoba variants on code-switched output, which repetition mitigation does not touch. But "6.7×" should not be quoted as a measured ratio — it compares two different inference backends with two different decoding configurations. Not re-run: the conclusion does not change and the compute is better spent on Phase 2.
    >
-   > MLX's own guards are what protect the shipped path — `compression_ratio_threshold` and temperature fallback, both on by default, plus `condition_on_previous_text=False` so a loop cannot persist across turns. No looping has been observed on this path across T0.7, T0.9 or T2.6.
+   > MLX's own guards are `compression_ratio_threshold` and temperature fallback, both on by default, plus `condition_on_previous_text=False` so a loop cannot persist across turns.
+   >
+   > **Correction, same day: they are not sufficient.** An end-to-end run
+   > (`benchmarks/voice-loop.md`) produced `火が火に火に火に火に火に火に火に火に火に火に`
+   > from one utterance — the same degenerate repetition T0.3 saw on transformers,
+   > on the MLX path, with those guards active. An earlier version of this note
+   > claimed no looping had been observed here; that was true of the runs made at
+   > the time and is now false. The failure mode survives the backend change, and
+   > the mitigation that fixed it does not exist on this backend. Open.
    >
    > Now standing constraint 8: never compare models across different backends or decoding-parameter sets.
 

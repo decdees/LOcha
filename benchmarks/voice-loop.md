@@ -183,3 +183,101 @@ feature is not for. G1a closes when G1b does.
 - G1b's bound. 3.2 s p50 / 4.6 s p95 stand exactly as written.
 - The firewall. It runs before any token is emitted, on the worker path too.
 - The T0.3 ASR decision. Confounded margin, unchanged conclusion — see `asr.md`.
+
+
+---
+
+# T2.6 round 3 — measured through the product path. G1b is MET.
+
+**Date:** 31 July 2026 · `benchmarks/voice_loop.py` · a real uvicorn process with
+the models warm, a real WebSocket client, audio paced in real time at 20 ms per
+chunk, 2 s between utterances.
+
+The two earlier harnesses fed frames as fast as Python could produce them, which
+is not how a conversation arrives, and both produced numbers that had to be
+discarded. This one exercises the serializer and the transport as well.
+
+## Instrument validation (constraint 9)
+
+| check | known answer | result |
+|---|---|---|
+| the models are real | `/health` reports `model_loaded` and resident GB | Qwen3.5-9B-4bit, 8.1 GB — not stubs |
+| the endpoint | when the client *actually* stopped sending, not the expected end (20 ms sleeps drift) | recorded per turn |
+| leading/trailing silence | corpus WAVs have recorded silence at both ends, which is not speech | trimmed before sending |
+| G1a | computed **client-side**, independently of the server's own instrument | reported per turn |
+
+Three harness bugs were found by this validation and fixed before any number
+below was recorded: the endpoint was the expected rather than the actual one; the
+untrimmed silence delayed the endpoint by ~1 s; and `terminate()` killed the
+`uv run` wrapper while uvicorn kept the port and the models (`start_new_session`
+plus `killpg`).
+
+## Result
+
+| turn | transcript | voice-to-first-audio | first filler | worst client-side gap |
+|---|---|---|---|---|
+| 01 | はじめましてよろしくお願いします | 2.61 | +0.71 | 1.12 |
+| 02 | すみません、駅はどこですか? | 2.20 | *early* | 1.47 |
+| 03 | **ご視聴ありがとうございました** | 1.95 | *early* | 1.29 |
+| 04 | これは、いくらですか? | 1.94 | +0.61 | 1.33 |
+| 05 | 日本語 | *negative* | *early* | — |
+| 06 | **ご視聴ありがとうございました** | *negative* | *early* | — |
+| 07 | **火が火に火に火に火に火に…** | 7.62 | +0.65 | 3.54 |
+| 08 | 写真を撮ってもいいですか? | 2.15 | +0.67 | 1.44 |
+
+**p50 = 2.05 s over 8/8 turns, against G1b's 3.2 s bound — MET.** On the four
+turns whose transcript is a complete, correct utterance (01, 02, 04, 08) the p50
+is **2.17 s**. Both are inside the bound, so the conclusion does not depend on
+which set is used; the honest headline is the clean-turn figure, because the
+other four measure defects rather than latency.
+
+That is a **1.6 s improvement** on round 2's 3.85 s, from three changes: the
+inference worker (the loop is free during generation), `VoicevoxTTS` off Pipecat's
+`TTSService` (which deferred synthesis to the end of the response), and silence
+trimming in the harness.
+
+## Three defects this run found, two of them in the product
+
+**1. `stop_secs = 0.2` was interrupting the learner.** It endpointed mid-utterance
+on 6 of 8 recordings, and the tutor answered fragments — 「が」, 「コーヒーを」,
+「日本語」. Not a latency problem: the product was cutting off a beginner, and
+beginners pause mid-sentence precisely because they are beginners. Raised to
+**0.6 s**, which sits *inside* voice-to-first-audio, so G1b pays for it directly
+and the 2.05 s above already includes it. The principled fix is Pipecat's
+smart-turn model — listed in ARCHITECTURE §2 alongside silero and never wired up —
+which decides whether an utterance is *finished* rather than whether the room is
+quiet. Two turns (05, 06) still endpointed early at 0.6 s.
+
+**2. Whisper hallucinates 「ご視聴ありがとうございました」 on near-silence.**
+"Thank you for watching" — a YouTube sign-off that saturates the training data.
+Twice in eight turns. An invented utterance is worse than none: the tutor answers
+something the learner never said, and it consumes a turn's FSRS scoring. Now
+filtered by transcript match, with a test.
+
+**3. The repetition loop survives on MLX.** Turn 07 produced
+`火が火に火に火に火に火に火に火に火に火に火に` — T0.3's degenerate repetition,
+on the backend where `no_repeat_ngram_size` does not exist, with
+`compression_ratio_threshold` and temperature fallback both active. **This
+directly falsifies a claim made earlier the same day** in `asr.md`, that no
+looping had been observed on this path; that was true of the runs made then and
+is false now. `asr.md` is corrected. Open: the fix has to be a post-hoc repetition
+check on the transcript or a different decoding strategy, since the mitigation
+that worked does not exist here.
+
+## G1a: 2 of 8 turns
+
+The filled pause fires ~0.65 s after the endpoint and covers its own duration, but
+a 1.1–1.5 s gap remains on every clean turn. The bank gives ~1.5 s of cover for a
+~2.2 s wait, and `MAX_PER_TURN = 2` is deliberately not raised — a third filled
+pause would mean concealing latency rather than filling a pause. With G1b now met
+at 2.17 s, the remaining gap is small enough that the honest next step is either a
+shorter follow-up delay or accepting that the first ~0.65 s before any filler is
+visible-state-only feedback.
+
+**A wire bug this run found before any of the above.** Pipecat's output transport
+serialises audio and transport messages and nothing else, so `TranscriptionFrame`
+and `LLMTextFrame` arriving at `transport.output()` were silently dropped — the
+pipeline worked, the tutor spoke, and the client received no transcript at all.
+Every in-process test passed. `ClientText` now converts them, with a regression
+test. Third instance this phase of the same lesson: the stub suite verifies that
+stages connect, not that the product works.

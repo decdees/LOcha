@@ -44,17 +44,28 @@ from ocha.speech.filler import FillerBank, FillerProcessor, FillerState
 from ocha.speech.probe import Spans, TurnStateProbe
 from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.tutor_stage import TutorStage
-from ocha.speech.wire import CHANNELS, SAMPLE_RATE, OchaSerializer
+from ocha.speech.wire import CHANNELS, SAMPLE_RATE, ClientText, OchaSerializer
 from ocha.turnstate import TurnTimeline
 from ocha.tutor.grammar import GrammarReference
 from ocha.tutor.llm import LlmService
 
 # stop_secs is the endpoint delay -- how long silence must last before the turn is
-# considered over. ARCHITECTURE §5.1 budgets 150 ms for it and calls the figure
-# unmeasured; 0.2 s is Pipecat's default and closer to what Japanese needs, since
-# a sentence-final です/ます trails off quietly and clipping it costs the transcript
-# its politeness marking. Measured in T2.6, not guessed at twice.
-VAD_PARAMS = VADParams(stop_secs=0.2)
+# considered over. ARCHITECTURE §5.1 budgets 150 ms and calls it unmeasured; the
+# first implementation used Pipecat's 0.2 s default.
+#
+# **0.2 s cuts the learner off.** Measured end to end (benchmarks/voice_loop.py):
+# it endpointed mid-utterance on 6 of 8 corpus recordings, producing transcripts
+# like 「が」 and 「コーヒーを」 -- the tutor answering a fragment while the user was
+# still speaking. That is not a latency problem, it is the product interrupting a
+# beginner, and beginners pause mid-sentence precisely because they are beginners.
+#
+# 0.6 s is a deliberate trade, not a tuned number: it sits **inside**
+# voice-to-first-audio, so G1b pays for it directly. The principled fix is
+# Pipecat's smart-turn model (ARCHITECTURE §2 lists it alongside silero and it has
+# never been wired up), which decides whether an utterance is *finished* rather
+# than whether the room is quiet. Until then, being slower is better than
+# interrupting.
+VAD_PARAMS = VADParams(stop_secs=0.6)
 
 
 def build_transport(websocket: WebSocket) -> FastAPIWebsocketTransport:
@@ -165,6 +176,7 @@ def build_pipeline(
                 tts if tts is not None else VoicevoxTTS(),
                 *emit,
                 tail,
+                ClientText(),
                 transport.output(),
             ]
         ),

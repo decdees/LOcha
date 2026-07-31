@@ -50,6 +50,7 @@ from pipecat.utils.time import time_now_iso8601
 from ocha.db import connect, migrate
 from ocha.db.seed import seed
 from ocha.scheduling import ItemScheduler
+from ocha.speech.asr import HALLUCINATIONS
 from ocha.speech.probe import TurnStateProbe
 from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.tutor_stage import TutorStage
@@ -84,6 +85,11 @@ class StubWhisper(SegmentedSTTService):
         self, audio: bytes
     ) -> AsyncGenerator[Frame | None, None]:
         self.segments.append(len(audio))
+        # The real service's hallucination guard, applied here too -- a stub that
+        # skips it would let the guard rot without any test noticing.
+        if any(h in self.transcript for h in HALLUCINATIONS):
+            yield None
+            return
         yield TranscriptionFrame(self.transcript, "", time_now_iso8601(), language=Language.JA)
 
 
@@ -221,3 +227,16 @@ async def test_the_firewall_holds_over_the_voice_path(db: sqlite3.Connection) ->
     assert leak not in repr(grammar), "model text reached the client"
     assert not rig.tts.spoken, f"a grammar answer was spoken aloud: {rig.tts.spoken}"
     assert not any(isinstance(f, TTSAudioRawFrame) for f in rig.down), "audio for a grammar answer"
+
+
+async def test_a_hallucinated_transcript_is_dropped(db: sqlite3.Connection) -> None:
+    """Whisper invents 「ご視聴ありがとうございました」 on near-silence.
+
+    Observed twice in an 8-turn end-to-end run. An invented utterance is worse
+    than no utterance: the tutor answers something the learner never said, which
+    reads as the tutor mishearing them, and it consumes a turn's FSRS scoring.
+    """
+    rig = Rig(db, StubLlm())
+    rig.asr.transcript = "ご視聴ありがとうございました"
+    await rig.speak()
+    assert not rig.tts.spoken, "the tutor replied to a hallucination"

@@ -154,6 +154,14 @@ class VoicevoxTTS(FrameProcessor):
         with wave.open(BytesIO(wav)) as w:
             return bytes(w.readframes(w.getnframes()))
 
+    def reachable(self) -> bool:
+        """True if the engine answers. Used at startup to fail with a useful message."""
+        try:
+            with urllib.request.urlopen(f"{self._base_url}/speakers", timeout=5):  # noqa: S310
+                return True
+        except Exception:
+            return False
+
     def _post(self, path: str, body: bytes | None = None, content_type: str | None = None) -> bytes:
         headers = {"Content-Type": content_type} if content_type else {}
         req = urllib.request.Request(

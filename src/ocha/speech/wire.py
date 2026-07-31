@@ -44,6 +44,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 
 SAMPLE_RATE = 16_000
@@ -71,21 +72,15 @@ class OchaSerializer(FrameSerializer):
     async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, OutputAudioRawFrame):
             return frame.audio
-        if isinstance(frame, InterimTranscriptionFrame):
-            return _json("transcript", text=frame.text, final=False)
-        if isinstance(frame, TranscriptionFrame):
-            return _json("transcript", text=frame.text, final=True)
-        if isinstance(frame, LLMTextFrame):
-            return _json("reply", text=frame.text)
         if isinstance(frame, InterruptionFrame):
             # Barge-in: the client must drop whatever it has queued for playback,
             # otherwise the tutor keeps talking over the user for the length of
             # its buffer.
-            return _json("interrupt")
+            return json.dumps({"type": "interrupt"}, ensure_ascii=False)
         if isinstance(frame, OutputTransportMessageFrame | OutputTransportMessageUrgentFrame):
-            # The escape hatch for everything else -- `state` and `grammar` are
-            # pushed as transport messages rather than given frame types of their
-            # own, because Pipecat has no frame that means either.
+            # Everything non-audio arrives here. See `ClientText` below for why
+            # transcripts and replies are transport messages rather than the text
+            # frames they start life as.
             return json.dumps(frame.message, ensure_ascii=False)
         return None
 
@@ -98,9 +93,39 @@ class OchaSerializer(FrameSerializer):
         return None
 
 
-def _json(type_: str, **fields: Any) -> str:
-    return json.dumps({"type": type_, **fields}, ensure_ascii=False)
-
-
 def state_message(state: str) -> dict[str, Any]:
     return {"type": "state", "state": state}
+
+
+class ClientText(FrameProcessor):
+    """Turns transcripts and tutor text into transport messages.
+
+    **Pipecat's output transport only serialises audio and transport messages.**
+    A `TranscriptionFrame` or `LLMTextFrame` reaching `transport.output()` is
+    simply not sent, so a serializer branch for them is dead code that looks
+    alive. Found end to end: the pipeline was working, the tutor was speaking, and
+    the client never received a single transcript.
+
+    Place immediately before `transport.output()` -- after TTS, so the text has
+    already been synthesised, and after anything that reads it.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        message = _client_message(frame)
+        if message is not None:
+            await self.push_frame(
+                OutputTransportMessageUrgentFrame(message=message), FrameDirection.DOWNSTREAM
+            )
+        await self.push_frame(frame, direction)
+
+
+def _client_message(frame: Frame) -> dict[str, Any] | None:
+    """The client-visible payload for a frame, or None if it has none."""
+    if isinstance(frame, InterimTranscriptionFrame):
+        return {"type": "transcript", "text": frame.text, "final": False}
+    if isinstance(frame, TranscriptionFrame):
+        return {"type": "transcript", "text": frame.text, "final": True}
+    if isinstance(frame, LLMTextFrame):
+        return {"type": "reply", "text": frame.text}
+    return None

@@ -180,7 +180,8 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 ### T2.2 — silero-vad endpointing and barge-in
 - [x] `VADProcessor(vad_analyzer=SileroVADAnalyzer(...))`, a standalone processor. **Correction to the note in T2.1:** `vad_analyzer` does live on `LLMUserAggregatorParams`, but that path requires adopting Pipecat's LLM context aggregators, which this pipeline does not use (`speech/tutor_stage.py`). `VADProcessor` is the wiring for a pipeline that owns its own context.
 - [x] **`VADUserStartedSpeakingFrame` is NOT a subclass of `UserStartedSpeakingFrame`** — both are bare SystemFrames. `VADProcessor` emits only the VAD pair, so the probe had to map them; without that, G1a reported an empty timeline and passed.
-- [ ] `stop_secs=0.2` is Pipecat's default and a guess for Japanese, where a sentence-final です/ます trails off quietly. §5.1 budgets 150 ms and calls the figure unmeasured. Measure in T2.6.
+- [x] **`stop_secs` MEASURED and it was wrong.** 0.2 s endpointed mid-utterance on 6 of 8 recordings — the tutor answering fragments while the learner was still speaking. Now 0.6 s, which sits inside voice-to-first-audio. Two turns still endpoint early.
+- [ ] **Wire up Pipecat smart-turn.** ARCHITECTURE §2 lists it next to silero and it has never been used. It asks whether an utterance is *finished* rather than whether the room is quiet, which is the actual question — a silence threshold cannot distinguish "done" from "thinking".
 - [ ] Barge-in on-device: the client stops playback on `interrupt`; untested without the app.
 ### T2.3 — ASR service wrapping the Phase 0 choice
 - [x] `OchaWhisper(SegmentedSTTService)` with `wants_wav_segments = False`; `no_repeat_ngram_size=4` carried over from T0.3, where its absence produced 557 insertions on one clip. Warmed at lifespan on the event-loop thread, next to the LLM.
@@ -197,11 +198,16 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - [x] **Measured through the pipeline: 3.73 s p50 over four turns — G1b MISSED by ~0.5 s.** Not model speed: MLX runs on the event-loop thread (constraint 6), so during generation the loop cannot deliver frames already pushed, and VOICEVOX's audio waits. `benchmarks/voice-loop.md`.
 - [x] **G1a fails on every turn.** Segmented whisper gives no interim transcripts, so `transcribing` sits unchanged for ~1.0 s. Not fixable by latency work; three options recorded, one needs a product decision. The test is not being loosened.
 - [ ] **DECISION NEEDED — a dedicated single-threaded inference worker with a queue.** Constraint 6 names this as the only correct shape once concurrency is needed. It now is. Expected recovery ~0.6–0.9 s, which is what G1b needs.
-- [ ] Live measurement from the phone: ≥20 spoken turns, once the client exists.
+- [x] **Measured through the product path: p50 2.05 s over 8 turns, 2.17 s over the four clean ones. G1b MET** (bound 3.2 s), down from 3.85 s. `benchmarks/voice_loop.py`, report in `benchmarks/voice-loop.md`.
+- [ ] **G1a is 2/8.** The filled pause fires ~0.65 s after the endpoint and leaves a 1.1–1.5 s gap. Not fixed by more fillers — `MAX_PER_TURN` stays at 2.
+- [ ] **Whisper repetition loops survive on MLX** — one turn produced `火が火に火に…` with `compression_ratio_threshold` and temperature fallback active. Needs a post-hoc repetition check on the transcript; `no_repeat_ngram_size` does not exist on this backend.
+- [ ] Live measurement from the phone: ≥20 spoken turns, once the PWA is on the phone.
 
 ### T2.7 — Browser client, voice-first *(absorbs the deleted T1.9 and T2.8's UI)*
-- [ ] `getUserMedia` + `AudioWorklet` → 16 kHz mono PCM over a WebSocket to `/ws`. Playback via `AudioContext`; barge-in drops the queue on `interrupt`.
-- [ ] Continuous-listening UI: live transcript (user + tutor), furigana on tutor output, grammar panel on `[GRAMMAR_QUERY]`, turn-state indicator driven by the server's `state` messages. Text input as a fallback mode, not the primary interface.
+- [x] `web/client.html` — one file, no build step. `getUserMedia` + `AudioWorklet` → 16 kHz mono PCM over the WebSocket; playback queued against an audio cursor; barge-in drops the queue on `interrupt`. The worklet downsamples rather than trusting the 16 kHz constraint, because iOS decides capture parameters for itself.
+- [x] Live transcript (user + tutor), grammar panel with `hindi_contrast` and the interference warning, turn-state indicator driven by the server's `state` messages.
+- [ ] **Not yet run against a browser.** Written while the measurement harness was running; the wire contract it codes against is tested, the UI is not.
+- [ ] Furigana on tutor output. Text input as a fallback mode.
 - [ ] **Developed against the Mac's own browser first.** No audio-routing quirk, no provisioning, no Tailscale hop — none of them debugged at the same time as the pipeline.
 - [ ] Then the same client from the iPhone as an installed PWA over Tailscale. **Unblocked:** both pre-flight gates passed (`benchmarks/ios-audio.md`).
 - **Not doing before October:** the native SwiftUI app. See T4.5 and ARCHITECTURE §2.3.

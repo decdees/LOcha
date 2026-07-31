@@ -117,7 +117,17 @@ class FillerBank:
     async def synthesise(
         cls, tts: object, sample_rate: int, texts: tuple[str, ...] = FILLERS
     ) -> FillerBank:
-        """Render every filler once, through the real TTS service."""
+        """Render every filler once, through the real TTS service.
+
+        Raises with the actual cause rather than "empty bank" -- the first time
+        VOICEVOX was down, startup failed with a message about the bank being
+        empty, which is the symptom and sends you to the wrong file.
+        """
+        if hasattr(tts, "reachable") and not tts.reachable():
+            raise RuntimeError(
+                "VOICEVOX is not answering on its HTTP port. It is a hard dependency: "
+                "no TTS, no spoken reply, and no filled pauses. Start the engine and retry."
+            )
         clips: dict[str, bytes] = {}
         for text in texts:
             audio = b""

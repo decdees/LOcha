@@ -1,0 +1,249 @@
+<!doctype html>
+<!--
+  T2.7 — the voice client.
+
+  One file, no build step, no framework. PRD FR-9 called for a React PWA; this is
+  the same thing without the toolchain, and the toolchain is what would have to be
+  justified: there is one screen, one WebSocket, and no routing. It runs from the
+  Mac's own browser during Phase 2 and installs to the iPhone home screen to ship
+  (both pre-flight gates passed — benchmarks/ios-audio.md).
+
+  Audio in:  getUserMedia -> AudioWorklet -> Int16 PCM -> binary WS frames.
+  Audio out: binary WS frames -> Float32 -> AudioBufferSourceNode, queued.
+  Control:   JSON text frames both ways (speech/wire.py is the contract).
+
+  The browser resamples to 16 kHz by asking for it. Safari on iOS ignores the
+  request and hands back 48 kHz, so the worklet downsamples rather than trusting
+  the constraint -- the pre-flight already showed iOS deciding capture parameters
+  for itself.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Ocha</title>
+<style>
+  :root { color-scheme: light dark; --bg:#faf8f5; --fg:#1c1917; --muted:#78716c;
+          --accent:#3f6212; --panel:#fff; --line:#e7e5e4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --accent:#a3e635;
+            --panel:#292524; --line:#44403c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system,
+         BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+         padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom); }
+  header { display:flex; align-items:center; gap:.75rem; padding:1rem 0; }
+  h1 { font-size:1.1rem; margin:0; font-weight:600; letter-spacing:.02em; }
+  #state { margin-left:auto; font-size:.8rem; color:var(--muted); display:flex;
+           align-items:center; gap:.4rem; }
+  #dot { width:.5rem; height:.5rem; border-radius:50%; background:var(--muted); }
+  /* The turn-state indicator is G1a's visible half. It must change when the
+     server says the state changed -- not on a timer, which would be theatre. */
+  #dot.listening { background:#22c55e; animation:pulse 1.2s ease-in-out infinite; }
+  #dot.transcribing { background:#eab308; animation:pulse .9s ease-in-out infinite; }
+  #dot.thinking { background:#f97316; animation:pulse .7s ease-in-out infinite; }
+  #dot.speaking { background:var(--accent); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  button { font:inherit; padding:.5rem 1rem; border-radius:999px; border:1px solid var(--line);
+           background:var(--panel); color:var(--fg); cursor:pointer; }
+  button[disabled] { opacity:.5; cursor:default; }
+  #log { display:flex; flex-direction:column; gap:.75rem; padding-bottom:2rem; }
+  .turn { padding:.75rem 1rem; border-radius:.75rem; background:var(--panel);
+          border:1px solid var(--line); }
+  .turn.you { border-left:3px solid #22c55e; }
+  .turn.tutor { border-left:3px solid var(--accent); }
+  .turn.grammar { border-left:3px solid #eab308; }
+  .who { font-size:.7rem; text-transform:uppercase; letter-spacing:.08em;
+         color:var(--muted); margin-bottom:.2rem; }
+  .jp { font-size:1.15rem; }
+  .interim { opacity:.55; font-style:italic; }
+  .warn { margin-top:.5rem; font-size:.85rem; color:#eab308; }
+  ul { margin:.4rem 0 0; padding-left:1.1rem; }
+  li { font-size:.95rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ocha 🍵</h1>
+  <button id="mic">Start</button>
+  <span id="state"><span id="dot"></span><span id="label">idle</span></span>
+</header>
+<div id="log"></div>
+
+<script type="module">
+const RATE = 16000;           // must match speech/wire.py; not negotiated
+const log = document.getElementById('log');
+const dot = document.getElementById('dot');
+const label = document.getElementById('label');
+const micBtn = document.getElementById('mic');
+
+let ws, audioCtx, node, stream, playAt = 0, interimEl = null, tutorEl = null;
+
+// The worklet: the only place audio is touched per-sample. Kept as a blob so the
+// client stays one file -- an AudioWorklet must be loaded from a URL.
+const workletSrc = `
+class Capture extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    // sampleRate is the context's real rate, whatever the browser decided to give
+    // us. iOS Safari ignores the 16 kHz constraint, so the ratio is computed here
+    // rather than assumed.
+    this.ratio = sampleRate / ${RATE};
+    this.carry = 0;
+  }
+  process(inputs) {
+    const ch = inputs[0][0];
+    if (!ch) return true;
+    // Linear decimation. Not a resampling filter: whisper is robust to the
+    // aliasing this leaves, and a polyphase filter here would be a lot of code in
+    // the one place that runs on the audio thread.
+    const out = new Int16Array(Math.floor((ch.length - this.carry) / this.ratio) + 1);
+    let n = 0;
+    for (let i = this.carry; i < ch.length; i += this.ratio) {
+      const s = Math.max(-1, Math.min(1, ch[Math.floor(i)]));
+      out[n++] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    this.carry = (this.carry + n * this.ratio) - ch.length;
+    if (n > 0) this.port.postMessage(out.subarray(0, n).buffer, [out.buffer]);
+    return true;
+  }
+}
+registerProcessor('capture', Capture);
+`;
+
+function setState(s) {
+  dot.className = s;
+  label.textContent = s;
+}
+
+function turn(kind, who) {
+  const el = document.createElement('div');
+  el.className = 'turn ' + kind;
+  el.innerHTML = '<div class="who"></div><div class="jp"></div>';
+  el.querySelector('.who').textContent = who;
+  log.append(el);
+  el.scrollIntoView({ block: 'end' });
+  return el;
+}
+
+function onMessage(ev) {
+  if (ev.data instanceof ArrayBuffer) return play(ev.data);
+  const m = JSON.parse(ev.data);
+  if (m.type === 'state') {
+    setState(m.state);
+    // A new listening state means the previous turn is over; the next tutor text
+    // starts a new bubble rather than appending to the last one.
+    if (m.state === 'listening') tutorEl = null;
+  } else if (m.type === 'transcript') {
+    if (!interimEl) interimEl = turn('you', 'you');
+    const jp = interimEl.querySelector('.jp');
+    jp.textContent = m.text;
+    jp.classList.toggle('interim', !m.final);
+    if (m.final) interimEl = null;
+  } else if (m.type === 'reply') {
+    if (!tutorEl) tutorEl = turn('tutor', 'ocha');
+    tutorEl.querySelector('.jp').textContent += m.text;
+  } else if (m.type === 'grammar') {
+    grammar(m);
+  } else if (m.type === 'interrupt') {
+    // Barge-in: drop everything queued, or the tutor talks over the user for the
+    // length of the playback buffer.
+    playAt = 0;
+    if (audioCtx) audioCtx.suspend().then(() => audioCtx.resume());
+  }
+}
+
+function grammar(m) {
+  const el = turn('grammar', m.entry_id ? 'grammar · ' + m.entry_id : 'grammar');
+  el.querySelector('.jp').textContent = m.text;
+  if (m.examples?.length) {
+    const ul = document.createElement('ul');
+    for (const ex of m.examples) {
+      const li = document.createElement('li');
+      li.textContent = ex;
+      ul.append(li);
+    }
+    el.append(ul);
+  }
+  if (m.hindi_contrast) {
+    const p = document.createElement('div');
+    p.className = 'warn';
+    p.textContent = m.hindi_contrast;
+    el.append(p);
+  }
+  if (m.interference_warning) {
+    const p = document.createElement('div');
+    p.className = 'warn';
+    p.textContent = '⚠ Hindi intuition misleads here.';
+    el.append(p);
+  }
+  tutorEl = null;
+}
+
+function play(buf) {
+  const pcm = new Int16Array(buf);
+  const audio = audioCtx.createBuffer(1, pcm.length, RATE);
+  const ch = audio.getChannelData(0);
+  for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 0x8000;
+  const src = audioCtx.createBufferSource();
+  src.buffer = audio;
+  src.connect(audioCtx.destination);
+  // Queue against a cursor, not "now": chunks arrive in bursts and playing each
+  // on arrival would overlap them into noise.
+  playAt = Math.max(playAt, audioCtx.currentTime);
+  src.start(playAt);
+  playAt += audio.duration;
+}
+
+async function start() {
+  micBtn.disabled = true;
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, sampleRate: RATE, echoCancellation: true,
+             noiseSuppression: true, autoGainControl: true },
+  });
+  // Log what we actually got. The pre-flight found the capture device varies
+  // between runs on the same phone, and a transcript quality question is
+  // unanswerable without knowing which microphone produced the audio.
+  const track = stream.getAudioTracks()[0];
+  console.log('capture:', track.label, track.getSettings());
+
+  audioCtx = new AudioContext();
+  await audioCtx.resume();
+  await audioCtx.audioWorklet.addModule(
+    URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' })));
+
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = onMessage;
+  ws.onclose = () => { setState('idle'); micBtn.disabled = false; micBtn.textContent = 'Start'; };
+  await new Promise(r => ws.onopen = r);
+
+  node = new AudioWorkletNode(audioCtx, 'capture');
+  node.port.onmessage = e => { if (ws.readyState === 1) ws.send(e.data); };
+  audioCtx.createMediaStreamSource(stream).connect(node);
+  // Not connected to destination: the worklet produces no output, and routing the
+  // microphone to the speakers is a feedback loop.
+
+  micBtn.disabled = false;
+  micBtn.textContent = 'Stop';
+  micBtn.onclick = stop;
+  setState('listening');
+}
+
+function stop() {
+  ws?.close();
+  stream?.getTracks().forEach(t => t.stop());
+  audioCtx?.close();
+  audioCtx = null;
+  playAt = 0;
+  micBtn.textContent = 'Start';
+  micBtn.onclick = start;
+  setState('idle');
+}
+
+micBtn.onclick = start;
+</script>
+</body>
+</html>
