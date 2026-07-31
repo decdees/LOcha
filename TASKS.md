@@ -165,7 +165,11 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice
 ## Phase 2 — Voice loop *(in scope)*
 
 ### T2.1 — Pipecat scaffold, pinned version, WebRTC transport
-- [ ] Verify audio quality on day one. `SmallWebRTCTransport` had a choppy-audio regression around v0.0.62 — pin a version that sounds correct and record which.
+- [ ] ~~`SmallWebRTCTransport` had a choppy-audio regression around v0.0.62 — pin a version that sounds correct.~~ **STALE (July 2026 check).** Pipecat is now **1.6.0**; that warning describes the 0.0.x series, two major versions back. Still verify audio quality on day one, but the pin advice no longer applies as written.
+- [ ] **Pipecat 1.0 restructured the API.** Services take submodule imports (`pipecat.services.X` → `pipecat.services.X.llm`); transports moved out of `services/`; provider-specific contexts are replaced by a universal `LLMContext`; `on_client_close` → `on_client_disconnected`. Most relevant here: **VAD config moved off transport params onto `LLMUserAggregatorParams.vad_analyzer`**, which changes T2.2.
+- [ ] **`pipecat-ai[mlx-whisper]` exists** — first-class MLX Whisper support, i.e. exactly the T0.3 choice. Also `[silero]`, `[webrtc]`, `[local]`, `[local-smart-turn]`. The ASR integration is likely a config, not a custom service.
+- [ ] **VOICEVOX has no Pipecat service** — write a custom TTS service against its local HTTP API (`/audio_query` then `/synthesis`, both already exercised in T0.7).
+- [ ] **Emit `TurnState` transitions from the pipeline** (`src/ocha/turnstate.py`). Not optional: PRD G1a is asserted against them, and retrofitting the events through five components later is the expensive path.
 
 ### T2.2 — silero-vad endpointing and barge-in
 ### T2.3 — ASR service wrapping the Phase 0 choice
@@ -180,6 +184,8 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The PWA is built once, voice
 - **Acceptance:** the user completes a 10-turn *spoken* exchange from an iPhone.
 
 ### T2.8 — Conversational feedback states *(load-bearing, not polish)*
+- [x] **Foundation done ahead of order.** `src/ocha/turnstate.py`: the `TurnState` enum, a `TurnTimeline` recorder, and `satisfies_g1a()`. Wired into `run_turn`, so Phase 1 already produces a timeline.
+- [x] **G1a is proven violable today**, before any voice component exists: at T0.9's measured 0.75 s LLM stage, the single `THINKING` state runs 1.01 s with no feedback. A test asserts this and fails if the instrument stops detecting it.
 - [ ] Transcript appears as ASR resolves; a visible listening state; a visible thinking state.
 - **Why this is not polish:** the restructured G1 makes "no dead air beyond ~500 ms without visible or audible feedback" a first-class criterion. At a measured 2.5 s voice-to-first-audio, feedback is what decides whether the app feels broken or merely deliberate. A silent 2.5 s gap reads as a crash; a 2.5 s gap with a live transcript reads as listening.
 - **Acceptance:** no state in a real turn leaves the user without feedback for more than 500 ms.

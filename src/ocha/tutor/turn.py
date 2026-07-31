@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from ocha.scheduling.rating import Usage, derive_rating
 from ocha.scheduling.scheduler import Item, ItemScheduler
+from ocha.turnstate import TurnState, TurnTimeline
 from ocha.tutor.context import MAX_REPLY_TOKENS, build_context
 from ocha.tutor.firewall import GrammarResponse, apply_firewall
 from ocha.tutor.grammar import GrammarReference
@@ -29,6 +30,10 @@ class TurnResult:
     targets: tuple[str, ...]
     ratings: dict[int, int]
     usage: dict[int, str]
+    # T2.8: what the user was told was happening, and when. Recorded from Phase 1
+    # so the pipeline built in T2.1-T2.5 has a contract to emit against rather
+    # than a retrofit afterwards.
+    timeline: TurnTimeline | None = None
 
     @property
     def grammar_query(self) -> bool:
@@ -61,13 +66,24 @@ def run_turn(
     user_text: str,
     *,
     session_id: int | None = None,
+    timeline: TurnTimeline | None = None,
 ) -> TurnResult:
+    tl = timeline if timeline is not None else TurnTimeline()
+
     session = ensure_session(conn, session_id)
     previous = _last_tutor_text(conn, session)
 
+    # Phase 1 has no microphone, so the turn starts already transcribed. The
+    # LISTENING and TRANSCRIBING states are emitted by the voice pipeline in
+    # T2.2/T2.3; from here the states are the same.
+    tl.emit(TurnState.THINKING, "building context")
     ctx = build_context(scheduler)
     raw = llm.generate(ctx.system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS)
     outcome = apply_firewall(raw, user_text, reference, conn)
+    tl.emit(
+        TurnState.GRAMMAR if outcome.fired else TurnState.SPEAKING,
+        "reference served" if outcome.fired else "first sentence ready",
+    )
 
     target_items: list[Item] = [
         i for i in scheduler.due_items(limit=20) if i.id in set(ctx.target_ids)
@@ -109,6 +125,7 @@ def run_turn(
         ),
     )
 
+    tl.finish()
     return TurnResult(
         session_id=session,
         turn_id=int(cur.lastrowid or 0),
@@ -117,4 +134,5 @@ def run_turn(
         targets=ctx.target_contents,
         ratings=ratings,
         usage=usage,
+        timeline=tl,
     )
