@@ -48,6 +48,8 @@ import random
 from dataclasses import dataclass, field
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     TTSAudioRawFrame,
     VADUserStartedSpeakingFrame,
@@ -178,6 +180,9 @@ class FillerProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, CancelFrame | EndFrame):
+            self._state.cancel()
 
         if self._emit:
             # Real synthesised speech has gone past, so no follow-up is wanted. What

@@ -111,7 +111,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         asr = OchaWhisper(sample_rate=SAMPLE_RATE, worker=worker)
         worker.start(llm.load, asr.warm)  # type: ignore[attr-defined]
         app.state.worker = worker
-        app.state.asr = asr
         llm = WorkerLlm(worker, llm)
 
         # Pre-synthesised filled pauses. ~0.4 s each here, 0 ms in the turn.
@@ -180,6 +179,16 @@ async def ws(websocket: WebSocket, loopback: bool = False) -> None:
     await websocket.accept()
     from ocha.speech.pipeline import run_session
 
+    asr = None
+    if not loopback:
+        from ocha.speech.asr import OchaWhisper
+
+        # SegmentedSTTService owns per-connection buffers and Pipecat lifecycle
+        # state, so it must never be relinked into a second pipeline. The MLX
+        # model remains warm in mlx_whisper's process cache and every inference
+        # call still runs on the one worker that loaded it.
+        asr = OchaWhisper(sample_rate=SAMPLE_RATE, worker=app.state.worker)
+
     probe = await run_session(
         websocket,
         app.state.conn,
@@ -187,9 +196,7 @@ async def ws(websocket: WebSocket, loopback: bool = False) -> None:
         app.state.grammar,
         app.state.llm,
         loopback=loopback,
-        # The warmed instance, not a fresh one -- a second OchaWhisper would pay
-        # the load cost again inside the first turn.
-        asr=getattr(app.state, "asr", None),
+        asr=asr,
         tts=getattr(app.state, "tts", None),
         fillers=getattr(app.state, "fillers", None),
         repair_audio=getattr(app.state, "repair_audio", None),

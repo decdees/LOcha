@@ -74,6 +74,7 @@
 
 <script type="module">
 const RATE = 16000;           // must match speech/wire.py; not negotiated
+const PLAYBACK_BUFFER_SECONDS = 0.150;
 const log = document.getElementById('log');
 const dot = document.getElementById('dot');
 const label = document.getElementById('label');
@@ -250,8 +251,9 @@ function play(buf) {
   src.connect(audioCtx.destination);
   // Queue against a cursor, not "now": chunks arrive in bursts and playing each
   // on arrival would overlap them into noise.
-  playAt = Math.max(playAt, audioCtx.currentTime);
-  const start = Math.max(playAt, audioCtx.currentTime);
+  const now = audioCtx.currentTime;
+  if (playAt <= now) playAt = now + PLAYBACK_BUFFER_SECONDS;
+  const start = playAt;
   const end = start + audio.duration;
   src.start(start);
   playAt = end;

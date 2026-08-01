@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from pipecat.frames.frames import (
@@ -167,6 +168,12 @@ async def test_client_playback_metric_is_typed(ser: OchaSerializer) -> None:
     assert isinstance(frame, ClientMetricFrame)
     assert frame.exchange_id == exchange_id
     assert frame.duration_ms == 320.0
+
+
+def test_pwa_buffers_playback_by_150ms() -> None:
+    client = (Path(__file__).parents[1] / "web" / "index.html").read_text()
+    assert "const PLAYBACK_BUFFER_SECONDS = 0.150;" in client
+    assert "if (playAt <= now) playAt = now + PLAYBACK_BUFFER_SECONDS;" in client
 
 
 async def test_setup_rejects_a_rate_mismatch(ser: OchaSerializer) -> None:

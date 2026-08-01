@@ -14,11 +14,14 @@ audio in must come back out byte for byte. The real pipeline is covered by
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
 
+import ocha.api.main as api_main
 from ocha.api.main import app
+from ocha.speech.asr import OchaWhisper
 from ocha.speech.wire import SAMPLE_RATE, AudioKind, unpack_audio
 from ocha.tutor.llm import StubLlm
 
@@ -67,3 +70,40 @@ def test_pcm_survives_the_round_trip(client: TestClient) -> None:
 def test_the_rate_is_pinned_at_16k() -> None:
     """Guards the one constant the iOS client hardcodes on its side."""
     assert SAMPLE_RATE == 16_000
+
+
+async def test_each_websocket_gets_fresh_asr_lifecycle_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[OchaWhisper] = []
+    worker = object()
+
+    class Socket:
+        async def accept(self) -> None:
+            pass
+
+    class Probe:
+        def report(self) -> dict[str, object]:
+            return {}
+
+    async def fake_run_session(*args: object, **kwargs: object) -> Probe:
+        created.append(cast(OchaWhisper, kwargs["asr"]))
+        return Probe()
+
+    for name, value in {
+        "worker": worker,
+        "conn": object(),
+        "scheduler": object(),
+        "grammar": object(),
+        "llm": StubLlm(),
+        "fillers": None,
+        "repair_audio": None,
+    }.items():
+        monkeypatch.setattr(app.state, name, value, raising=False)
+    monkeypatch.setattr("ocha.speech.pipeline.run_session", fake_run_session)
+
+    await api_main.ws(Socket())  # type: ignore[arg-type]
+    await api_main.ws(Socket())  # type: ignore[arg-type]
+
+    assert created[0] is not created[1]
+    assert all(asr._worker is worker for asr in created)

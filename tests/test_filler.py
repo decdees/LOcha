@@ -66,7 +66,7 @@ async def test_a_filler_fires_at_the_vad_endpoint() -> None:
         Pipeline([trigger, emitter]), frames_to_send=[VADUserStoppedSpeakingFrame()]
     )
     assert any(isinstance(f, FillerAudioFrame) for f in down), "nothing was said"
-    state.cancel()
+    assert state.task is None, "the filler task outlived pipeline teardown"
 
 
 async def test_the_trigger_alone_says_nothing() -> None:
