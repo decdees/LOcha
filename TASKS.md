@@ -7,6 +7,17 @@ Reference documents in this repo:
 - `PRD.md` — what and why
 - `ARCHITECTURE.md` — how (component choices, latency budget, memory budget)
 
+## Correctness remediation — 1 August 2026
+
+- [x] Package curated grammar data; require model weights to be local before startup.
+- [x] Quarantine complete LLM output and share one firewall/finalization path.
+- [x] Remove mutable prompt caching; pass at most four explicit role-tagged exchanges; keep every MLX call on one inference worker.
+- [x] Turn suspicious ASR into a visible event plus pre-synthesized repair audio.
+- [x] Persist free-conversation observations without creating FSRS ratings.
+- [x] Attribute all WebSocket events/audio with OCH1 exchange UUIDs and sequences; add known-answer v2 measurement tests.
+- [ ] Re-record ASR separately through iPhone microphone and AirPods/HFP.
+- [ ] Run the unfiltered 50-turn iPhone v2 gate. **G1a and G1b remain unproven.**
+
 ---
 
 ## Phase 0 — Bake-off *(gate: no application code until complete)*
@@ -108,24 +119,24 @@ Reference documents in this repo:
 - [x] SQLite schema (WAL mode) via a numbered-SQL migrator. Tables: `items`, `reviews`, `sessions`, `turns`, `utterances`, `pronunciation_scores`, plus `unauthored_grammar` for T1.5's miss log.
 - [x] `items` carries FSRS state, item type (vocab / grammar / phrase), and content.
 - [x] `turns` stores user transcript, tutor reply, target item IDs, derived rating, and whether the firewall fired.
-- **Acceptance:** migrations run clean and are idempotent; seed inserts 50 starter vocabulary items. ✅ **9 tests green.**
+- **Acceptance:** migrations run clean and are idempotent; seed inserts 50 starter vocabulary items. ✅
 
 ### T1.3 — FSRS integration ✅
 - [x] Wrapped `py-fsrs`. `due_items(limit)`, `known_items(min_reps)`, `lowest_stability(limit)`, `record_review(item_id, rating)`, plus `retrievability(item_id)`.
 - [x] PRD FR-8 derivation table implemented. The accent cap is **PROVISIONAL and disabled by default** per the amended FR-8 — code path and tests exist, only the score is absent, so T3.6 enabling it is a flag flip.
-- **Acceptance:** every rating path unit-tested; 30-day simulation gives 0 → 2 → 13 → 55 → 179 → 535 → 1436 → 3407 day intervals. ✅ **27 tests green.**
+- **Acceptance:** every explicit scheduler rating path is unit-tested; 30-day simulation gives 0 → 2 → 13 → 55 → 179 → 535 → 1436 → 3407 day intervals. ✅
 
 ### T1.4 — Grammar reference ✅
-- [x] `data/grammar.json` conforming to PRD FR-7 — 20 entries covering the T0.5 probe topics.
+- [x] `src/ocha/resources/grammar.json` packaged with the wheel — 20 entries covering the T0.5 probe topics.
 - [x] `hindi_contrast` on 15 of 20, only where the analogy holds. `interference_warning: true` on 9, including all three named: ने/が (`particle_wa_ga`), gender agreement (`particle_no`), stress-vs-pitch (`pitch_accent_basics`).
 - [x] Pydantic loader, fail-fast, reports **every** malformed entry rather than just the first. `extra="forbid"` so a typo'd key is an error, not a silent drop.
-- **Acceptance:** 20 valid entries load; malformed entries rejected. ✅ **45 tests green.**
+- **Acceptance:** 20 valid entries load; malformed entries rejected. ✅
 
 ### T1.5 — Grammar firewall ✅ *(critical path)*
-- [x] Detect the literal `[GRAMMAR_QUERY]` sentinel in model output. **Assert it is the ENTIRE payload, not merely present** — T0.5 observed the sentinel emitted alongside 399 chars of grammar explanation when thinking was enabled; a substring test would have passed that and leaked it.
+- [x] Detect the contiguous `GRAMMAR_QUERY` token anywhere in the completed model output, including damaged brackets. Presence suppresses the entire output; arbitrary marker-free explanations are not claimed detectable.
 - [x] On detection, suppress the model's response entirely and serve from `grammar.json`. Verbatim — a test asserts every field is byte-identical to the curated entry.
 - [x] On reference miss: return "not yet documented", log to `unauthored_grammar`. **Never** falls back to generation. Entry resolution is a deterministic trigger table — using the LLM to resolve would put it back in the correctness path.
-- **Acceptance:** a test asserts that when the sentinel fires, no model-generated text reaches the response payload. This test must never be weakened. ✅ **Formulated as derivability — every user-visible field byte-identical to the reference — not a phrase blacklist. 72 tests green.**
+- **Acceptance:** a test asserts that when the sentinel fires, no model-generated text reaches text or audio. This test must never be weakened. ✅
 
 ### T1.6 — Context Builder ✅
 - [x] Assembles the system prompt from `known_items`, `due_items`, `lowest_stability`; history is carried on `TurnContext` for T1.8.
@@ -133,30 +144,30 @@ Reference documents in this repo:
 - [x] **REGISTER line included** — T0.5 measured it worth 9/15 → 14/15.
 - [x] **§7.1's template corrected, not copied.** As written it was self-contradictory against real FSRS state: "use only words from KNOWN" while `TARGET` listed due items, which are typically *not* known. `TARGET` is now split into PRACTISE (known, weak) and INTRODUCE (not known, at most one per reply), which encodes FR-3 explicitly.
 - [x] Context cap 2048, not 8k — T0.4 measured TTFT 32.6 s and decode 14.3 tok/s at 8k.
-- **Acceptance:** snapshot tests over three FSRS states (cold start, some known, some weak). ✅ **83 tests green.**
+- **Acceptance:** snapshot tests over three FSRS states (cold start, some known, some weak). ✅
 
 ### T1.7 — LLM service ✅
 - [x] MLX-backed local inference, `mlx-community/gemma-4-26b-a4b-it-4bit` per `benchmarks/DECISION.md`, as a **config value** (`OCHA_LLM_MODEL`).
 - [x] Loaded once in the FastAPI lifespan, kept warm. Streaming interface present for Phase 2's sentence chunker.
 - [x] **`enable_thinking=False`.**
-- [x] **KV-cache reuse across turns**, keyed on a hash of the system prompt and rebuilt when it changes — reusing a cache built on a different prefix would silently feed the model the wrong context.
-- [x] Fails loudly if the model is unavailable; `generate()` before `load()` raises rather than lazy-loading.
-- **Acceptance:** `/health` reports model loaded and resident memory. ✅ **`model_loaded: true`, `resident_memory_gb: 14.2`** — matching T0.4. End-to-end smoke: cold load 8.9 s, then 2.65 → 1.08 → 0.97 s per turn as the cache warms; a grammar question produced a clean bare sentinel and the firewall served `particle_wa_ga`. **96 tests green.**
+- [x] Mutable prompt caches removed. History is explicit, role-tagged, limited to four complete exchanges and pruned to a 2,048-token rendered prompt.
+- [x] Fails loudly if local model weights are unavailable; `generate()` before `load()` raises rather than lazy-loading or downloading.
+- **Acceptance:** `/health` reports model loaded and resident memory, and real-model slow tests cover owner-thread status/generation and consecutive history. ✅
 
 ### T1.8 — Turn orchestration ✅
-- [x] `POST /turn` — accepts text, returns tutor reply (or firewalled grammar answer), targets, derived ratings and usage.
+- [x] `POST /turn` — accepts text, returns tutor reply (or firewalled grammar answer), targets and observations; compatibility `ratings`/`usage` are empty.
 - [x] Usage detection via `fugashi` lemmas, not substring matching — 食べる appears as 食べます/食べました/食べて. Handles unidic's orthography drift (ご飯→御飯), loanword lemma suffixes (コーヒー-coffee), and multi-token items (お茶 = 接頭辞+名詞).
 - [x] **FR-8's "avoided" narrowed to *elicited* items.** Read literally it would rate five items `Again` every turn — a 1–2 sentence reply cannot exercise six targets. Avoidance now requires the tutor to have put the item in play.
 - [x] Grammar-query turns are not scored — asking a question is not a production attempt.
-- **Acceptance:** 10-turn integration test asserts FSRS state evolves; plus HTTP-level tests. ✅ **118 tests green. Live: p50 1.14 s over 6 turns, firewall fired on both grammar questions, 0 unauthored misses.**
+- **Acceptance:** 10-turn free conversation leaves FSRS state unchanged while observations persist; HTTP-level firewall tests pass. ✅
 
 ### T1.9 — *(deleted)* Minimal PWA
-Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, voice-first, as T2.7 — now a native iOS app rather than a PWA. See PRD §10 and ARCHITECTURE §2.3.
+Cut. Phase 1 exposes `POST /turn`; the voice-first PWA is built once in T2.7. Native iOS remains deferred.
 
 ### T1.10 — No-network test ✅
 - [x] `src/ocha/net_guard.py` intercepts `socket.connect`/`connect_ex` and refuses anything outside loopback and the Tailscale CGNAT range (100.64.0.0/10).
 - [x] The guard is itself proven: a deliberate outbound connection raises `OutboundNetworkError`, and a test asserts the patch is removed afterwards so it cannot silently disable later tests.
-- **Acceptance:** a full `/turn`, a `/health`, and a firewalled grammar turn all complete with zero outbound connections. ✅ **125 tests green.**
+- **Acceptance:** a full `/turn`, a `/health`, and a firewalled grammar turn all complete with zero outbound connections. ✅
 
 > **GATE.** T1.8's 10-turn integration test passes and T1.10 (no-network) passes. Proceed directly to Phase 2 — this is not a go/no-go, and Phase 1 is not a stopping point. See PRD §10.
 
@@ -173,7 +184,7 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - [x] **VOICEVOX has no Pipecat service** — wrote `speech/tts.py` against its local HTTP API. `outputSamplingRate` is set on the query, so VOICEVOX renders at 16 kHz directly and no resampler sits in the latency path.
 - [x] **Instrumentation built FIRST, before any real `FrameProcessor`.** `src/ocha/speech/probe.py` — `TurnStateProbe` is a pass-through tap that maps frames to `TurnState` and times the §5.1 stages. A test asserts it never buffers or reorders, which is §5.2's named worst failure.
 - [x] **Pipecat 1.6.0 installed** with `[webrtc,silero]`. API confirmed against the running library rather than the migration guide.
-- [x] **`FastAPIWebsocketTransport` mounted on the existing FastAPI app**, `/ws`, 16 kHz mono PCM in and out. The client is native (§2.3), so the serializer is ours to choose: use Pipecat's protobuf serializer only if the Swift side stays trivial, otherwise a minimal framing of raw PCM + JSON control messages. **Chose ours** (`speech/wire.py`): protobuf would put SwiftProtobuf and a generated `frames_pb2` mirror on the client for a format we own both ends of.
+- [x] **`FastAPIWebsocketTransport` mounted on the existing FastAPI app**, `/ws`, 16 kHz mono PCM in and out. The PWA and server own both ends, so `speech/wire.py` uses a small OCH1 binary audio header plus JSON control messages instead of imposing protobuf and generated client bindings.
 - [x] Pipeline assembled: `transport.input() → VAD → ASR → context/LLM → chunker → TTS → transport.output()`, with `TurnStateProbe` tapped once, immediately before `transport.output()`. **Loopback first, not stubs:** the pipeline today is `input -> loopback -> probe -> output`, which is the day-one audio test rather than scaffolding — it answers whether HFP audio survives the round trip, by ear, before ASR exists to blame.
 - [ ] Wired to a live connection (needs Tailscale for the phone).
 
@@ -182,15 +193,15 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - [x] **`VADUserStartedSpeakingFrame` is NOT a subclass of `UserStartedSpeakingFrame`** — both are bare SystemFrames. `VADProcessor` emits only the VAD pair, so the probe had to map them; without that, G1a reported an empty timeline and passed.
 - [x] **`stop_secs` MEASURED and it was wrong.** 0.2 s endpointed mid-utterance on 6 of 8 recordings — the tutor answering fragments while the learner was still speaking. Now 0.6 s, which sits inside voice-to-first-audio. Two turns still endpoint early.
 - [ ] **Wire up Pipecat smart-turn — scoped, not a config change.** `LocalSmartTurnAnalyzerV3` exists and is genuinely local (ONNX, offline, one-time model download). But it attaches through `TurnAnalyzerUserTurnStopStrategy` → `LLMUserAggregatorParams.user_turn_strategies`, i.e. hanging off Pipecat's LLM aggregator — **the same component this pipeline deliberately does not use**, because Phase 1 owns context, history and the firewall (`speech/tutor_stage.py`). Two options: adopt the aggregator (two implementations of the turn — rejected once already) or drive the strategy directly. The latter looks viable: it exposes `process_frame`, `handle_user_turn_started/stopped` and a `trigger_user_turn_stopped` event, so a ~50-line adapter can feed it frames and act on its verdict.
-  - **Validate on Japanese before building the adapter** (constraint 9). Smart-turn is trained predominantly on English; whether it recognises a Japanese sentence-final です/ます or a mid-sentence 「えーと」 pause is unknown and is the entire reason for using it. Run the analyzer offline over the corpus first: it must not fire mid-utterance and must fire at the end. If it cannot do that, the adapter is wasted work and `stop_secs` tuning is what we have.
+  - **Validate on the target learner before building the adapter** (constraint 9). Current releases support Japanese, but viability on Hindi-L1 absolute-beginner speech, mid-sentence pauses and code-switching is unproven. Run the analyzer over that corpus first.
 - [ ] Barge-in on-device: the client stops playback on `interrupt`; untested without the app.
 ### T2.3 — ASR service wrapping the Phase 0 choice
 - [x] `OchaWhisper(SegmentedSTTService)` with `wants_wav_segments = False`; `no_repeat_ngram_size=4` carried over from T0.3, where its absence produced 557 insertions on one clip. Warmed at lifespan on the event-loop thread, next to the LLM.
 - [ ] **Re-measure CER through the production audio path — and through BOTH capture devices.** The T2.1 pre-flight found the input device is not stable: two runs on the same phone with the same headset connected gave `AirPods` and `iPhone Microphone` respectively. The corpus characterises the MacBook's built-in mic, which is neither of them. The T0.2 corpus was recorded on the MacBook's built-in mic, so `2.56` describes an input path the product will never see. Re-record part of the corpus through AirPods → iPhone → transport → ASR and re-score with the same pre-registered rules. See `benchmarks/ios-audio.md`.
-### T2.4 — Streaming LLM into a sentence chunker (split on 。！？)
-- [x] **No chunker was written.** Pipecat's `TTSService` already aggregates text into sentences and its boundary set includes 。！？, so `TutorStage` emits one `LLMTextFrame` per sentence and the default does the rest. A test asserts two synthesis calls for a two-sentence reply, which is the property §5.2 rule 2 actually wants.
-- [x] **Not streaming token-by-token, deliberately.** The firewall must see the reply before any of it is emitted (constraint 2), and the win forgone is bounded: ~0.7 s of generation at a measured 20.5 tok/s, most of it in the first sentence. The upgrade path is recorded in `speech/tutor_stage.py`.
-- [x] Phase 1 is reused rather than reimplemented — `TutorStage` calls `run_turn`, so context building, the firewall, usage detection and FSRS scoring have exactly one implementation.
+### T2.4 — Accuracy-first LLM quarantine and sentence TTS
+- [x] `TutorStage` collects the complete generation on the inference worker. It emits nothing model-derived until shared `finalize_turn` has firewalled and persisted the result.
+- [x] After finalization, safe replies are split on 。！？ for sentence-sized synthesis. A late or corrupted sentinel produces zero model text and zero audio.
+- [x] Phase 1 is reused rather than reimplemented: HTTP and voice share finalization, observation and persistence.
 ### T2.5 — VOICEVOX service, synthesis per sentence
 - [x] `VoicevoxTTS`, speaker 13, 16 kHz. Verified against the live engine: 0.48 s for 「そうですね。」, consistent with T0.7's 0.63 s.
 - [x] **A stub-only test suite was green while the service was broken.** `self.sample_rate` is 0 until the pipeline's StartFrame reaches `start()`, so a standalone call asked for 0 Hz and got an HTTP 500. `tests/test_voicevox_live.py` (slow) now covers the real contract.
@@ -199,15 +210,16 @@ Cut. Phase 1 exposes `POST /turn` and nothing else. The client is built once, vo
 - [x] **Measured through the pipeline: 3.73 s p50 over four turns — G1b MISSED by ~0.5 s.** Not model speed: MLX runs on the event-loop thread (constraint 6), so during generation the loop cannot deliver frames already pushed, and VOICEVOX's audio waits. `benchmarks/voice-loop.md`.
 - [x] **G1a fails on every turn.** Segmented whisper gives no interim transcripts, so `transcribing` sits unchanged for ~1.0 s. Not fixable by latency work; three options recorded, one needs a product decision. The test is not being loosened.
 - [ ] **DECISION NEEDED — a dedicated single-threaded inference worker with a queue.** Constraint 6 names this as the only correct shape once concurrency is needed. It now is. Expected recovery ~0.6–0.9 s, which is what G1b needs.
-- [x] **Measured through the product path: p50 2.05 s over 8 turns, 2.17 s over the four clean ones. G1b MET** (bound 3.2 s), down from 3.85 s. `benchmarks/voice_loop.py`, report in `benchmarks/voice-loop.md`.
-- [ ] **G1a is 2/8.** The filled pause fires ~0.65 s after the endpoint and leaves a 1.1–1.5 s gap. Not fixed by more fillers — `MAX_PER_TURN` stays at 2.
-- [ ] **Whisper repetition loops survive on MLX** — one turn produced `火が火に火に…` with `compression_ratio_threshold` and temperature fallback active. Needs a post-hoc repetition check on the transcript; `no_repeat_ngram_size` does not exist on this backend.
-- [ ] Live measurement from the phone: ≥20 spoken turns, once the PWA is on the phone.
+- [x] **Historical 2.05 s result invalidated.** It mixed exchange provenance, admitted negative latencies, post-selected clean turns and calculated p95 incorrectly. Preserved in `benchmarks/voice-loop.json`.
+- [ ] **G1a/G1b unproven.** Run exactly 50 attributable iPhone turns with `voice_loop_v2.py`; report every ASR rejection and instrument failure.
+- [x] **Whisper repetition loops are rejected visibly.** Post-hoc detection emits `asr_rejected`, displays the suspect transcript, plays the curated repair prompt and skips LLM/persistence/observations/FSRS. It does not silently consume the turn.
+- [ ] Live v2 measurement from the phone: exactly 50 spoken turns, with no post-selection.
 
 ### T2.7 — Browser client, voice-first *(absorbs the deleted T1.9 and T2.8's UI)*
-- [x] `web/client.html` — one file, no build step. `getUserMedia` + `AudioWorklet` → 16 kHz mono PCM over the WebSocket; playback queued against an audio cursor; barge-in drops the queue on `interrupt`. The worklet downsamples rather than trusting the 16 kHz constraint, because iOS decides capture parameters for itself.
+- [x] `web/index.html` — one file, no build step. `getUserMedia` + `AudioWorklet` → 16 kHz mono PCM over the WebSocket; playback queued against an audio cursor; barge-in drops the queue on `interrupt`. The worklet downsamples rather than trusting the 16 kHz constraint, because iOS decides capture parameters for itself.
 - [x] Live transcript (user + tutor), grammar panel with `hindi_contrast` and the interference warning, turn-state indicator driven by the server's `state` messages.
-- [ ] **Not yet run against a browser.** Written while the measurement harness was running; the wire contract it codes against is tested, the UI is not.
+- [x] `ClientText` is retained as the supported adapter from Pipecat transcript/reply frames to transport messages.
+- [x] Browser UI and transport verified end to end; the automated test browser blocked microphone capture, so the real iPhone capture path remains a physical validation item.
 - [ ] Furigana on tutor output. Text input as a fallback mode.
 - [ ] **Developed against the Mac's own browser first.** No audio-routing quirk, no provisioning, no Tailscale hop — none of them debugged at the same time as the pipeline.
 - [ ] Then the same client from the iPhone as an installed PWA over Tailscale. **Unblocked:** both pre-flight gates passed (`benchmarks/ios-audio.md`).
@@ -230,7 +242,7 @@ Cut with the native client. Nothing to re-sign — a PWA installs from a URL. Se
 - **Why here and not Phase 0:** a sustained-session test only means anything once there is a session to sustain. Every Phase 0 figure came from short bursts.
 - **Acceptance:** a written result in `benchmarks/thermals.md`.
 
-> **The single biggest failure mode:** breaking the streaming chain with a buffering `FrameProcessor` or a non-streaming HTTP TTS call. Every service downstream of the LLM must consume `TextFrame` as it arrives. Audit this before optimising anything else.
+> **The single biggest failure mode:** emitting any model-derived text or audio before the complete response passes the shared firewall. Full-output quarantine is mandatory even when it misses the latency gate.
 
 - **Gate:** G1a holds over 50 real spoken turns from the phone (no state without feedback for >500 ms), and p50 voice-to-first-audio is within G1b's 3.2 s bound. ~~< 1200 ms~~ — retired with G1, see PRD §7a.
 

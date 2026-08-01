@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ocha.api.main import app
-from ocha.speech.wire import SAMPLE_RATE
+from ocha.speech.wire import SAMPLE_RATE, AudioKind, unpack_audio
 from ocha.tutor.llm import StubLlm
 
 # 20 ms of silence at the pinned rate: 320 frames, 2 bytes each.
@@ -46,12 +46,22 @@ def test_pcm_survives_the_round_trip(client: TestClient) -> None:
     with client.websocket_connect("/ws?loopback=1") as ws:
         for _ in range(10):
             ws.send_bytes(CHUNK)
-        out = b""
-        while len(out) < len(CHUNK):
+        pcm = b""
+        sequences: list[int] = []
+        exchange_ids = set()
+        kinds = set()
+        while len(pcm) < len(CHUNK):
             msg = ws.receive()
             if (data := msg.get("bytes")) is not None:
-                out += data
-    assert out[: len(CHUNK)] == CHUNK
+                exchange_id, sequence, kind, chunk = unpack_audio(data)
+                exchange_ids.add(exchange_id)
+                sequences.append(sequence)
+                kinds.add(kind)
+                pcm += chunk
+    assert len(exchange_ids) == 1
+    assert sequences == list(range(len(sequences)))
+    assert kinds == {AudioKind.TUTOR}
+    assert pcm[: len(CHUNK)] == CHUNK
 
 
 def test_the_rate_is_pinned_at_16k() -> None:

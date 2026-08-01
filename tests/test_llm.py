@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import sys
+import types
+from pathlib import Path
+from typing import Any
+
 import pytest
 
+import ocha.tutor.llm as llm_module
 from ocha.tutor.llm import (
     DEFAULT_MODEL,
+    ChatMessage,
     LlmService,
     MlxLlm,
     StubLlm,
-    _prefix_key,
     model_id,
 )
 
@@ -51,53 +57,96 @@ def test_missing_model_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
         llm.load()
 
 
+def test_load_passes_a_resolved_local_path_to_mlx(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+    fake_mlx_lm = types.ModuleType("mlx_lm")
+
+    def fake_load(path: str) -> tuple[object, object]:
+        seen.append(path)
+        return object(), object()
+
+    fake_mlx_lm.load = fake_load  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx_lm", fake_mlx_lm)
+    monkeypatch.setattr(llm_module, "resolve_cached_model", lambda _repo: tmp_path)
+
+    MlxLlm().load()
+    assert seen == [str(tmp_path)]
+
+
 def test_status_reports_not_loaded_before_load() -> None:
     st = MlxLlm().status()
     assert st.loaded is False
     assert st.resident_gb == 0.0
 
 
-# ---- KV-cache prefix keying ---------------------------------------------
+# ---- explicit bounded history, without mutable inference state ----------
 
 
-def test_prefix_key_is_stable_and_discriminating() -> None:
-    a = "You are a Japanese conversation partner.\nKNOWN: 私、これ"
-    b = "You are a Japanese conversation partner.\nKNOWN: 私、これ、それ"
-    assert _prefix_key(a) == _prefix_key(a)
-    assert _prefix_key(a) != _prefix_key(b)
+class CaptureTokenizer:
+    def __init__(self) -> None:
+        self.rendered_messages: list[list[dict[str, str]]] = []
+
+    def apply_chat_template(self, messages: list[dict[str, str]], **_: Any) -> str:
+        self.rendered_messages.append(messages)
+        return "|".join(f"{m['role']}:{m['content']}" for m in messages)
+
+    def encode(self, text: str) -> list[str]:
+        return list(text)
 
 
-def test_cache_is_rebuilt_when_the_system_prompt_changes(
+def test_history_is_role_tagged_and_oldest_complete_exchanges_are_dropped() -> None:
+    llm = MlxLlm()
+    tok = CaptureTokenizer()
+    llm._tok = tok
+    history = tuple(
+        message
+        for n in range(5)
+        for message in (
+            ChatMessage("user", f"u{n}" + "x" * 300),
+            ChatMessage("assistant", f"a{n}" + "y" * 300),
+        )
+    )
+
+    rendered = llm._render("system", history, "current")
+
+    final = tok.rendered_messages[-1]
+    assert final[0] == {"role": "system", "content": "system"}
+    assert [m["role"] for m in final].count("system") == 1
+    assert final[-1] == {"role": "user", "content": "current"}
+    assert all("u0" not in m["content"] and "a0" not in m["content"] for m in final)
+    assert [m["role"] for m in final[1:-1]] == ["user", "assistant"] * 3
+    assert len(tok.encode(rendered)) <= 2048
+
+
+def test_system_and_current_turn_over_budget_fail_explicitly() -> None:
+    llm = MlxLlm()
+    llm._tok = CaptureTokenizer()
+    with pytest.raises(ValueError, match="system prompt plus current turn"):
+        llm._render("s" * 2048, (), "current")
+
+
+def test_stream_does_not_create_or_pass_a_mutable_prompt_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The correctness issue hiding inside a latency optimisation.
+    seen: dict[str, object] = {}
+    fake_mlx_lm = types.ModuleType("mlx_lm")
 
-    The KV cache encodes one specific prefix. The Context Builder rewrites the
-    system prompt as FSRS state evolves, so reusing a cache built on prompt A
-    while sending prompt B would silently feed the model the wrong context --
-    a correctness bug that looks like a performance win.
-    """
-    import mlx_lm.models.cache as cache_mod
+    def fake_stream_generate(*args: object, **kwargs: object) -> list[object]:
+        seen.update(kwargs)
+        return [types.SimpleNamespace(text="はい。")]
 
-    made: list[object] = []
-
-    def fake_make(_model: object) -> object:
-        made.append(object())
-        return made[-1]
-
-    monkeypatch.setattr(cache_mod, "make_prompt_cache", fake_make)
-
+    fake_mlx_lm.stream_generate = fake_stream_generate  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx_lm", fake_mlx_lm)
     llm = MlxLlm()
-    llm._model = object()  # pretend loaded; no weights involved
+    llm._model = object()
+    llm._tok = CaptureTokenizer()
 
-    first = llm._prompt_cache("PROMPT A")
-    again = llm._prompt_cache("PROMPT A")
-    assert again is first, "same prefix must reuse the cache (T0.4: 1.81s -> 0.50s flat)"
-    assert len(made) == 1
-
-    changed = llm._prompt_cache("PROMPT B")
-    assert changed is not first, "changed prefix must NOT reuse a stale cache"
-    assert len(made) == 2
+    assert "".join(llm.stream("system", "user")) == "はい。"
+    assert "prompt_cache" not in seen
+    assert not hasattr(llm, "_cache")
+    assert not hasattr(llm, "_cache_key")
 
 
 # ---- stub behaviour -----------------------------------------------------
@@ -107,6 +156,13 @@ def test_stub_records_what_it_was_given() -> None:
     stub = StubLlm(reply="はい。")
     assert stub.generate("SYS", "USER") == "はい。"
     assert stub.calls == [("SYS", "USER")]
+
+
+def test_stub_accepts_explicit_history() -> None:
+    stub = StubLlm(reply="はい。")
+    history = (ChatMessage("user", "前"), ChatMessage("assistant", "返答"))
+    assert stub.generate("SYS", "USER", history=history) == "はい。"
+    assert stub.histories == [history]
 
 
 def test_stub_streams_the_same_text_it_generates() -> None:

@@ -26,6 +26,7 @@ from ocha.db.seed import seed
 from ocha.scheduling import ItemScheduler
 from ocha.speech.wire import SAMPLE_RATE
 from ocha.tutor.llm import LlmService, MlxLlm
+from ocha.tutor.observation import Evidence
 from ocha.tutor.turn import run_turn
 
 # Set to skip the model load -- for `make dev` when you only want the HTTP surface,
@@ -37,17 +38,9 @@ WEB_DIR = pathlib.Path(__file__).resolve().parents[3] / "web"
 
 # One shared connection, one writer.
 #
-# /turn is `async def` deliberately. MLX GPU streams are THREAD-LOCAL: the model is
-# loaded on the event-loop thread during lifespan startup, and generating from a
-# threadpool worker fails with "There is no Stream(gpu, 1) in current thread".
-# FastAPI dispatches `def` endpoints to a threadpool and `async def` endpoints on
-# the event loop, so async keeps inference on the thread that owns the stream.
-#
-# ponytail: this blocks the event loop for the 1-3 s a generation takes. Acceptable
-# because there is exactly one user (PRD §4 non-goals) and nothing else needs
-# serving concurrently. If that ever changes, the upgrade is a dedicated
-# single-threaded inference worker with a queue -- not a threadpool, which would
-# reintroduce this exact bug.
+# One lock serializes the single user's turn mutation. MLX work, including status,
+# is submitted to the dedicated inference worker that loaded both models; FastAPI's
+# event loop and threadpool never touch MLX directly.
 _turn_lock = threading.Lock()
 
 
@@ -73,6 +66,7 @@ class TurnResponse(BaseModel):
     reply: str | None = None
     grammar: GrammarPayload | None = None
     targets: list[str] = []
+    observations: dict[int, Evidence] = {}
     ratings: dict[int, int] = {}
     usage: dict[int, str] = {}
 
@@ -105,6 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from ocha.inference import InferenceWorker, WorkerLlm
         from ocha.speech.asr import OchaWhisper
         from ocha.speech.filler import FillerBank
+        from ocha.speech.repair import synthesise_repair
         from ocha.speech.tts import VoicevoxTTS
 
         # ONE thread owns both models for the process lifetime. Loading happens on
@@ -120,9 +115,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         llm = WorkerLlm(worker, llm)
 
         # Pre-synthesised filled pauses. ~0.4 s each here, 0 ms in the turn.
-        app.state.fillers = await FillerBank.synthesise(
-            VoicevoxTTS(sample_rate=SAMPLE_RATE), SAMPLE_RATE
-        )
+        voice = VoicevoxTTS(sample_rate=SAMPLE_RATE)
+        app.state.fillers = await FillerBank.synthesise(voice, SAMPLE_RATE)
+        app.state.repair_audio = await synthesise_repair(voice)
     app.state.llm = llm
     yield
     if app.state.worker is not None:
@@ -165,6 +160,7 @@ async def turn(req: TurnRequest) -> TurnResponse:
         reply=result.reply,
         grammar=grammar,
         targets=list(result.targets),
+        observations=result.observations,
         ratings=result.ratings,
         usage=result.usage,
     )
@@ -196,6 +192,7 @@ async def ws(websocket: WebSocket, loopback: bool = False) -> None:
         asr=getattr(app.state, "asr", None),
         tts=getattr(app.state, "tts", None),
         fillers=getattr(app.state, "fillers", None),
+        repair_audio=getattr(app.state, "repair_audio", None),
     )
     logging.getLogger(__name__).info("ws session ended: %s", probe.report())
 

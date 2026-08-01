@@ -1,5 +1,13 @@
 # T2.6 — the voice loop, measured from inside the pipeline
 
+> **Invalidated 1 August 2026.** The 2.05 s p50 and associated p95 claims below
+> are preserved as historical evidence, not accepted measurements. The harness
+> inferred audio provenance from arrival order, admitted negative latencies,
+> post-selected "clean" turns, used the wrong p95 index, and treated a turn with
+> no feedback events as zero silence. G1a and G1b are **unproven**. New runs use
+> `voice_loop_v2.py`, OCH1 exchange headers, client-clock scheduled playback, all
+> 50 iPhone turns, and nearest-rank p95 (`ceil(0.95*n)-1`).
+
 **Date:** 31 July 2026 · MacBook Pro M4 32 GB · whisper-large-v3-mlx + Qwen3.5-9B-4bit + VOICEVOX 0.25.2 speaker 13, all co-resident · silero VAD · corpus recordings as input
 
 Every earlier latency figure was produced by a script that called the components in order (T0.3, T0.4, T0.7, T0.9). This is the first measurement **through the pipeline that ships**, taken by `TurnStateProbe` at four taps.

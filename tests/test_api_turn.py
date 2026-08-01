@@ -38,6 +38,9 @@ def test_turn_returns_200_over_http(client: TestClient) -> None:
     assert body["session_id"] > 0
     assert body["turn_id"] > 0
     assert body["reply"]
+    assert "observations" in body
+    assert body["ratings"] == {}
+    assert body["usage"] == {}
 
 
 def test_session_is_reused_across_turns(client: TestClient) -> None:

@@ -31,6 +31,13 @@ def test_shipped_reference_loads() -> None:
     assert len(g) == 20
 
 
+def test_shipped_reference_is_independent_of_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert len(load_grammar()) == 20
+
+
 def test_shipped_reference_covers_the_probe_topics() -> None:
     """T1.4: seeded with entries covering the T0.5 probe topics."""
     g = load_grammar()

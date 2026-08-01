@@ -34,7 +34,7 @@ Three things invalidate parts of the earlier plan:
 |---|---|---|---|
 | Orchestration | **Pipecat** (BSD-2) | Free | negligible |
 | Transport | ~~WebRTC (`SmallWebRTCTransport`)~~ **WebSocket** (`FastAPIWebsocketTransport`), 16 kHz mono PCM — reversed with the client, §2.3 | — | — |
-| VAD / turn detection | **silero-vad** + Pipecat smart-turn | MIT | ~50 MB |
+| VAD / turn detection | **silero-vad**; Pipecat Smart Turn deferred | MIT | ~50 MB |
 | ASR | ~~kotoba-whisper-v2.0~~ **whisper-large-v3 on MLX** (`mlx-community/whisper-large-v3-mlx`) — **T0.3 REVERSED this**, see §2.1. Wrapped by hand, **not** via `pipecat-ai[mlx-whisper]`: that module imports `faster_whisper` at module scope even for its MLX class, so using it means installing CTranslate2 to run a model we already call directly (T2.3). | Apache 2.0 | ~3 GB |
 | LLM | ~~Gemma 4 26B-A4B (MoE)~~ **Qwen3.5-9B, 4-bit** (`mlx-community/Qwen3.5-9B-4bit`) — reversed on correctness (DECISION.md) and again on capacity (§3.0) | Apache 2.0 | ~5 GB |
 | TTS | **VOICEVOX Engine**, speaker **id 13 (青山龍星)** — a §6.1 dependency, not a preference | Free (per-character terms) | ~0.3 GB |
@@ -56,6 +56,8 @@ Three things invalidate parts of the earlier plan:
 2. **Speed.** The 6.3x figure does not survive contact with the runtime. large-v3 on MLX runs **p50 1.25 s** against kotoba's **1.10 s** on transformers — a 14% difference. The runtime dominates the model choice.
 
 **Why the reasoning inverted:** the distillation is trained on native Japanese. The actual input is a Hindi-L1 absolute beginner speaking accented Japanese and code-switching mid-sentence. That is *out of domain* for a narrow distillation and *in domain* for a multilingual generalist. §2.1 had the direction of the domain gap backwards.
+
+**Smart Turn status.** Current Pipecat releases support Japanese, so language support is not the blocker. Adoption remains deferred until it is validated on a Hindi-L1 absolute-beginner corpus with mid-sentence pauses and code-switching. A support claim is not evidence on this learner distribution.
 
 kotoba-whisper-v2.2 is moot — v2.0 was already beaten.
 
@@ -83,7 +85,11 @@ Phase 2 therefore develops against a **browser client on the Mac**: no audio-rou
 
 **The transport choice survives the reversal.** WebSocket rather than WebRTC, even with a browser client. `getUserMedia` plus an `AudioWorklet` hands the page PCM directly, and Tailscale (WireGuard) already solves NAT traversal a layer below. What is left of WebRTC's value is jitter buffering and echo cancellation, neither of which pays for SDP negotiation, ICE, and an Opus round-trip on a LAN link. The client streams **16 kHz mono PCM over a WebSocket** into Pipecat's `FastAPIWebsocketTransport`, mounted on the FastAPI app that already serves `POST /turn`. One process, one port, one Tailscale hostname. This is also what makes a later native client cheap: the wire format is 40 lines of JSON-and-PCM, not an SDP negotiation.
 
-Cost of the choice: no automatic packet-loss concealment, and echo cancellation becomes the client's job (`AVAudioSession` `.voiceChat` mode provides it). Both are acceptable on a link that is a WireGuard tunnel over LAN.
+`ClientText` is a supported transport adapter: Pipecat's output transport serializes audio and transport-message frames, not transcript/LLM text frames. Converting those frames immediately before output is the intended boundary, not an accidental workaround.
+
+All model weights must already exist in the local Hugging Face cache. Setup may download them explicitly; application startup resolves with `local_files_only=True` and fails rather than downloading or choosing a fallback.
+
+Cost of the choice: no automatic packet-loss concealment, and echo cancellation remains the PWA's capture responsibility. Both are acceptable on a link that is a WireGuard tunnel over LAN; the native Phase 4 client can later use `AVAudioSession` `.voiceChat` mode.
 
 ---
 
@@ -167,7 +173,7 @@ Workable. Two rules:
 
 - **Keep everything warm.** A cold MLX load is 15–25s and destroys the illusion of conversation. Run the model server as a `launchd` daemon, not on demand.
 - **Cap context at ~2k, not 8k.** T0.4 revised this. KV growth is the smaller problem; *prefill and decode* are the larger ones. At 8k, TTFT is 32.6 s and decode drops to 14.3 tok/s — slower than the dense model. At 2k the MoE still runs ~36 tok/s. A 10-turn tutor conversation measured 560 tokens, so 2k is ample.
-- **Reuse the KV cache across turns.** Not an optimisation — a requirement. See §5.2 rule 4.
+- **Do not retain mutable MLX prompt caches.** Every turn renders the system prompt, at most four explicit role-tagged exchanges, and the current user turn. Oldest complete exchanges are dropped until the prompt is at most 2,048 tokens.
 
 ---
 
@@ -185,9 +191,9 @@ Pipecat pipeline ── FastAPIWebsocketTransport
    │
    ├─ whisper-large-v3 ────► transcript          (1250 ms, T0.3 measured)
    │
-   ├─ Context Builder ─────► system prompt + FSRS due items + last N turns
+   ├─ Context Builder ─────► system prompt + FSRS steering + explicit history
    │
-   ├─ Qwen3.5-9B ──────────► streaming TextFrames (first token ~500ms)
+   ├─ Qwen3.5-9B ──────────► complete reply quarantined on inference worker
    │
    ├─ Sentence Chunker ────► splits on 。！？ boundaries
    │
@@ -201,21 +207,21 @@ Pipecat pipeline ── FastAPIWebsocketTransport
 
 | Stage | Target | Notes |
 |---|---|---|
-| VAD endpoint | 150 ms → **200 ms configured** | Still unmeasured in isolation. `stop_secs=0.2`, because a sentence-final です/ます trails off quietly and clipping it costs the transcript its politeness marking. |
+| VAD endpoint | **600 ms configured** | Accuracy-first: 200 ms cut off 6/8 recorded beginner utterances. Smart Turn remains deferred pending the target corpus. |
 | ASR | ~~250 ms~~ **1250 ms** | **T0.3 MEASURED**, large-v3 on MLX. The 250 ms assumed kotoba, which T0.3 disqualified. Choosing kotoba to save 150 ms would cost 6.7x the character errors, and a wrong transcript costs a whole turn. |
-| LLM TTFT | ~~200 ms~~ **500 ms** | **T0.4 MEASURED.** "MoE prefill is cheap" is wrong: prefill runs 160–400 tok/s and is O(context). 500 ms is *with* KV-cache reuse; without it, p50 is 1.81 s and grows every turn. |
+| LLM stage | **UNPROVEN in v2** | Mutable prompt-cache reuse is removed. The complete output is quarantined before firewall finalization, so historical TTFT is not the user-visible metric. |
 | First sentence generated | ~~250 ms~~ **400 ms** | **T0.4 MEASURED.** ~15 tokens at 37.7 tok/s. (The old row's arithmetic was inconsistent: 15 tokens at 30 tok/s is 500 ms, not 250.) |
 | VOICEVOX synthesis | ~~200 ms~~ **690 ms standalone / 1170–1440 ms in the pipeline** | **T2.6 MEASURED.** The gap between the two is the blocked event loop, not VOICEVOX. |
 | Network (Tailscale, LAN) | 30 ms | WAN adds 50–150 ms |
-| **Voice-to-first-audio** | ~~**~1.1 s**~~ ~~**~2.53 s**~~ **3.73 s** | **T2.6 MEASURED THROUGH THE PIPELINE — G1b is missed by ~0.5 s.** 3.73 s p50 over four consecutive turns, against G1b's 3.2 s bound. The 2.53 s figure was a script calling the components in order; the pipeline is ~1.2 s slower, and **not because of model speed**. MLX inference runs on the event-loop thread (constraint 6), so during generation the loop cannot deliver frames that have already been pushed — VOICEVOX finishes synthesising in its thread and the audio then waits. `first text → first audio` measures 1.17–1.44 s against a standalone 0.48–0.58 s. The recovery is constraint 6's own sanctioned shape: a dedicated single-threaded inference worker with a queue. See `benchmarks/voice-loop.md`. |
+| **Voice-to-first-audio** | **UNPROVEN** | The historical 2.05 s result is invalid because attribution was inferred from arrival order and negative measurements were admitted. The v2 measure is final client-sent speech sample to scheduled first `tutor` audio for the same exchange. Accuracy-first full-output quarantine remains in place even if the latency gate is missed. |
 
 ### 5.2 The three rules that produce that number
 
-1. **Never break the streaming chain.** The single biggest Pipecat latency failure is a custom `FrameProcessor` that buffers a full LLM response, or a non-streaming HTTP TTS call. Every service downstream of the LLM must consume `TextFrame` as it arrives. Auditing this is typically worth 300–600 ms of p95.
-2. **Chunk TTS by sentence, not by response.** Synthesise 「そうですね。」 while the model is still generating the rest.
+1. **Quarantine the complete LLM response.** No model-derived text or audio is emitted until the shared firewall/finalization function has examined the entire reply. This correctness requirement intentionally overrides streaming latency.
+2. **After finalization, chunk TTS by sentence.** Sentence-sized synthesis remains useful, but it begins only from the safe `TurnResult.reply`.
 3. **Cap reply length in the system prompt.** One to two sentences. This is both more natural for a tutor and ~3x faster. Enforce it with `max_tokens` too — prompts get ignored.
 
-~~**Use WebRTC, not WebSockets.**~~ **Reversed with the client — see §2.3.** The advice was correct for a browser client and does not apply to a native one: WebRTC's NAT traversal is redundant behind Tailscale, and its Opus round-trip is pure cost when the app already holds PCM. The choppy-audio caveat referred to `SmallWebRTCTransport` in the 0.0.x series and is doubly moot — Pipecat is at 1.6.0 and that transport is no longer used.
+~~**Use WebRTC, not WebSockets.**~~ **Reversed — see §2.3.** Behind Tailscale, WebRTC's NAT traversal is redundant and its Opus round-trip is pure cost because the PWA already captures PCM. The choppy-audio caveat referred to `SmallWebRTCTransport` in the 0.0.x series and is doubly moot — Pipecat is at 1.6.0 and that transport is no longer used.
 
 The three rules above are transport-agnostic and unchanged.
 
@@ -292,7 +298,7 @@ known   = fsrs.known_items(min_reps=3)   # safe vocabulary/grammar pool
 weak    = fsrs.lowest_stability(limit=3) # struggling items
 ```
 
-These go into the system prompt as **constraints, not suggestions**:
+These go into the system prompt as strong **steering, not deterministic enforcement**:
 
 ```
 You are a Japanese conversation partner. Reply in 1–2 short sentences.
@@ -322,22 +328,13 @@ respond with exactly: [GRAMMAR_QUERY]
 
 The `[GRAMMAR_QUERY]` sentinel is the mechanism. When the model emits it, the app does *not* let the model answer.
 
-> **T0.5: the firewall must assert the sentinel is the ENTIRE payload.** A naive `"[GRAMMAR_QUERY]" in output` test is unsafe — with thinking enabled, the observed output contained the sentinel *and* a full grammar explanation, and would have passed such a check while leaking exactly what the firewall exists to block. Both candidates emitted a clean bare sentinel on 5/5 grammar questions once thinking was disabled. It routes to a curated local reference keyed to your FSRS item IDs — a JSON file you build from Tae Kim / Imabi / DoJG entries as you encounter each grammar point.
+> The firewall suppresses the **entire completed output whenever the contiguous token `GRAMMAR_QUERY` is present**, including damaged brackets and dirty surrounding text. It does not claim to structurally detect arbitrary marker-free grammar explanations. Curated package data is the only grammar-answer source.
 
 A 4-bit local model will confidently give you a wrong explanation of は vs が, and you will not have the Japanese to detect it. That is the single highest-risk failure mode in this entire system. The firewall is not optional.
 
-### 7.3 Grading a conversational turn
+### 7.3 Observing a conversational turn
 
-FSRS expects a rating. Derive it, don't ask for it:
-
-| Signal | Weight |
-|---|---|
-| Item used correctly, unprompted | Good / Easy |
-| Item used after a hint | Hard |
-| Item avoided or substituted | Again |
-| Pronunciation score below threshold | Cap at Hard regardless of correctness |
-
-That last row matters: a word you produce with wrong accent is not a word you know.
+Free conversation can establish only that a target surface or lemma occurred. It stores one `mentioned` or `mentioned_after_prompt` observation per turn/item and never calls `record_review()`. Malformed Japanese such as `ご飯を食べるです` may contain `食べる`; that is not proof of correct recall. Only a future explicit validated drill may produce an FSRS rating.
 
 ---
 

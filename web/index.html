@@ -79,7 +79,20 @@ const dot = document.getElementById('dot');
 const label = document.getElementById('label');
 const micBtn = document.getElementById('mic');
 
+const HEADER_BYTES = 26;      // OCH1 + version + kind + u32 seq + UUID
 let ws, audioCtx, node, stream, playAt = 0, interimEl = null, tutorEl = null;
+const scheduled = new Map(); // exchange UUID -> {source,start,end,seq,kind}[]
+const clientIntervals = new Map();
+const clientVisible = new Map();
+
+// The physical benchmark supplies speech_end_ms and ASR acceptance after each
+// spoken turn. These retained client-clock records are the other half of that
+// capture and deliberately contain no server absolute timestamps.
+window.ochaCaptureV2 = () => ({
+  protocol_version: 2,
+  visible_by_exchange: Object.fromEntries(clientVisible),
+  audio_by_exchange: Object.fromEntries(clientIntervals),
+});
 
 // The worklet: the only place audio is touched per-sample. Kept as a blob so the
 // client stays one file -- an AudioWorklet must be loaded from a URL.
@@ -131,8 +144,13 @@ function turn(kind, who) {
 function onMessage(ev) {
   if (ev.data instanceof ArrayBuffer) return play(ev.data);
   const m = JSON.parse(ev.data);
+  if (!m.exchange_id || !Number.isInteger(m.seq)) {
+    throw new Error('Unattributed Ocha JSON event');
+  }
   if (m.type === 'state') {
+    const changed = label.textContent !== m.state;
     setState(m.state);
+    if (changed) retainVisible(m);
     // A new listening state means the previous turn is over; the next tutor text
     // starts a new bubble rather than appending to the last one.
     if (m.state === 'listening') tutorEl = null;
@@ -142,17 +160,29 @@ function onMessage(ev) {
     jp.textContent = m.text;
     jp.classList.toggle('interim', !m.final);
     if (m.final) interimEl = null;
+    retainVisible(m);
   } else if (m.type === 'reply') {
     if (!tutorEl) tutorEl = turn('tutor', 'ocha');
     tutorEl.querySelector('.jp').textContent += m.text;
+    retainVisible(m);
   } else if (m.type === 'grammar') {
     grammar(m);
+    retainVisible(m);
+  } else if (m.type === 'asr_rejected') {
+    const el = turn('grammar', 'recognition retry');
+    el.querySelector('.jp').textContent =
+      `I may have misheard “${m.text}”. ${m.repair_text}`;
+    retainVisible(m);
   } else if (m.type === 'interrupt') {
-    // Barge-in: drop everything queued, or the tutor talks over the user for the
-    // length of the playback buffer.
-    playAt = 0;
-    if (audioCtx) audioCtx.suspend().then(() => audioCtx.resume());
+    cancelExchange(m.exchange_id);
   }
+}
+
+function retainVisible(m) {
+  const events = clientVisible.get(m.exchange_id) || [];
+  events.push({ exchange_id:m.exchange_id, seq:m.seq,
+    at_ms:audioCtx.currentTime * 1000, type:m.type });
+  clientVisible.set(m.exchange_id, events);
 }
 
 function grammar(m) {
@@ -182,8 +212,36 @@ function grammar(m) {
   tutorEl = null;
 }
 
+function uuidString(bytes) {
+  const hex = [...bytes].map(v => v.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
+function parseAudio(buf) {
+  const view = new DataView(buf);
+  if (view.byteLength < HEADER_BYTES ||
+      String.fromCharCode(...new Uint8Array(buf, 0, 4)) !== 'OCH1' || view.getUint8(4) !== 1) {
+    throw new Error('Invalid Ocha audio header');
+  }
+  const kind = view.getUint8(5);
+  if (![1, 2, 3].includes(kind)) throw new Error('Invalid Ocha audio kind');
+  return {
+    kind,
+    seq: view.getUint32(6, false),
+    exchangeId: uuidString(new Uint8Array(buf, 10, 16)),
+    pcm: new Int16Array(buf, HEADER_BYTES),
+  };
+}
+
+function metric(exchangeId, event, seq, clientTimeMs, durationMs = null) {
+  if (ws?.readyState !== 1) return;
+  ws.send(JSON.stringify({ type:'client_metric', exchange_id:exchangeId, event,
+    seq, client_time_ms:clientTimeMs, duration_ms:durationMs }));
+}
+
 function play(buf) {
-  const pcm = new Int16Array(buf);
+  const packet = parseAudio(buf);
+  const pcm = packet.pcm;
   const audio = audioCtx.createBuffer(1, pcm.length, RATE);
   const ch = audio.getChannelData(0);
   for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 0x8000;
@@ -193,12 +251,50 @@ function play(buf) {
   // Queue against a cursor, not "now": chunks arrive in bursts and playing each
   // on arrival would overlap them into noise.
   playAt = Math.max(playAt, audioCtx.currentTime);
-  src.start(playAt);
-  playAt += audio.duration;
+  const start = Math.max(playAt, audioCtx.currentTime);
+  const end = start + audio.duration;
+  src.start(start);
+  playAt = end;
+
+  const entry = { source:src, start, end, seq:packet.seq, kind:packet.kind };
+  const clips = scheduled.get(packet.exchangeId) || [];
+  clips.push(entry);
+  scheduled.set(packet.exchangeId, clips);
+  const intervals = clientIntervals.get(packet.exchangeId) || [];
+  intervals.push({ exchange_id:packet.exchangeId, seq:packet.seq, kind:packet.kind,
+    start_ms:start * 1000, duration_ms:audio.duration * 1000, cancelled_at_ms:null });
+  clientIntervals.set(packet.exchangeId, intervals);
+  metric(packet.exchangeId, 'playback_start', packet.seq, start * 1000);
+  metric(packet.exchangeId, 'playback_duration', packet.seq, start * 1000, audio.duration * 1000);
+  src.onended = () => {
+    const remaining = (scheduled.get(packet.exchangeId) || []).filter(x => x !== entry);
+    if (remaining.length) scheduled.set(packet.exchangeId, remaining);
+    else scheduled.delete(packet.exchangeId);
+  };
+}
+
+function cancelExchange(exchangeId) {
+  if (!audioCtx || !exchangeId) return;
+  const now = audioCtx.currentTime;
+  for (const clip of scheduled.get(exchangeId) || []) {
+    if (clip.end > now) {
+      try { clip.source.stop(now); } catch (_) {}
+      metric(exchangeId, 'cancellation', clip.seq, now * 1000);
+    }
+  }
+  for (const interval of clientIntervals.get(exchangeId) || []) {
+    if (interval.start_ms + interval.duration_ms > now * 1000) {
+      interval.cancelled_at_ms = now * 1000;
+    }
+  }
+  scheduled.delete(exchangeId);
+  playAt = Math.max(now, ...[...scheduled.values()].flat().map(x => x.end), now);
 }
 
 async function start() {
   micBtn.disabled = true;
+  clientIntervals.clear();
+  clientVisible.clear();
   try {
     await connect();
   } catch (err) {
@@ -254,6 +350,7 @@ function stop() {
   audioCtx?.close();
   audioCtx = null;
   playAt = 0;
+  scheduled.clear();
   micBtn.textContent = 'Start';
   micBtn.onclick = start;
   setState('idle');

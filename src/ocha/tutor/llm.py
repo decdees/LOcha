@@ -12,9 +12,9 @@ preferences -- each came out of Phase 0 measurement:
    399 characters of explanation -- the firewall discards it, but the model is
    spending hundreds of tokens leaking what FR-5 forbids. Off is required.
 
-3. KV-cache reuse held across turns. T0.4: without it TTFT p50 is 1.81 s and
-   GROWS every turn; with it, 0.50 s and flat. This is the single largest latency
-   lever inside the LLM stage.
+3. Conversation history is explicit and bounded. Mutable prompt caches previously
+   made correctness depend on hidden model state; accuracy-first operation renders
+   the complete bounded prompt for every turn.
 
 The model id is a config value, not a hardcoded constant, so swapping it is a
 config edit rather than a code change (DECISION.md). No plugin interface -- that
@@ -24,10 +24,12 @@ would be a speculative abstraction with one implementation.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from hashlib import blake2b
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
+
+from ocha.models import resolve_cached_model
+from ocha.tutor.context import MAX_CONTEXT_TOKENS
 
 # benchmarks/DECISION.md. Override with OCHA_LLM_MODEL.
 #
@@ -52,22 +54,38 @@ class LlmStatus:
     resident_gb: float
 
 
+@dataclass(frozen=True, slots=True)
+class ChatMessage:
+    role: Literal["user", "assistant"]
+    content: str
+
+
 @runtime_checkable
 class LlmService(Protocol):
     """What the tutor layer depends on. Kept narrow so tests can stub it -- the
     real model is 14.2 GB and cannot live in a unit-test suite."""
 
-    def generate(self, system_prompt: str, user_text: str, *, max_tokens: int = ...) -> str: ...
+    def generate(
+        self,
+        system_prompt: str,
+        user_text: str,
+        *,
+        history: Sequence[ChatMessage] = ...,
+        max_tokens: int = ...,
+    ) -> str: ...
 
-    def stream(self, system_prompt: str, user_text: str, *, max_tokens: int = ...) -> Iterator[str]:
+    def stream(
+        self,
+        system_prompt: str,
+        user_text: str,
+        *,
+        history: Sequence[ChatMessage] = ...,
+        max_tokens: int = ...,
+    ) -> Iterator[str]:
         """Unused in Phase 1, required in Phase 2's sentence chunker."""
         ...
 
     def status(self) -> LlmStatus: ...
-
-
-def _prefix_key(system_prompt: str) -> str:
-    return blake2b(system_prompt.encode("utf-8"), digest_size=16).hexdigest()
 
 
 class MlxLlm:
@@ -79,8 +97,6 @@ class MlxLlm:
         # force casts at every use site without buying real checking.
         self._model: Any = None
         self._tok: Any = None
-        self._cache: Any = None
-        self._cache_key: str | None = None
 
     # ---- lifecycle -----------------------------------------------------
 
@@ -90,19 +106,15 @@ class MlxLlm:
         if self._model is not None:
             return
         try:
+            local_path = resolve_cached_model(self.model_name)
             from mlx_lm import load
-        except ImportError as exc:  # pragma: no cover - environment problem
-            raise RuntimeError(
-                "mlx_lm is not installed. Ocha has no cloud fallback; install the "
-                "bench dependency group."
-            ) from exc
-        try:
+
             # load() returns (model, tokenizer) or (model, tokenizer, config)
             # depending on its return_config flag, typed as a Union. A 2-tuple
             # unpack is correct at runtime with the default but does not
             # type-check, so take the first two by index -- valid for both arities
             # and it keeps working if a future version always returns the config.
-            loaded = load(self.model_name)
+            loaded = load(str(local_path))
             self._model, self._tok = loaded[0], loaded[1]
         except Exception as exc:
             raise RuntimeError(
@@ -124,57 +136,78 @@ class MlxLlm:
 
     # ---- generation ----------------------------------------------------
 
-    def _render(self, system_prompt: str, user_text: str) -> str:
+    def _render(
+        self,
+        system_prompt: str,
+        history: Sequence[ChatMessage],
+        user_text: str,
+    ) -> str:
         assert self._tok is not None
-        rendered: str = self._tok.apply_chat_template(
-            [
+
+        retained = list(history[-8:])
+        if len(retained) % 2 or any(
+            message.role != ("user" if index % 2 == 0 else "assistant")
+            for index, message in enumerate(retained)
+        ):
+            raise ValueError("history must contain complete user/assistant exchanges")
+
+        def render(messages: Sequence[ChatMessage]) -> str:
+            payload = [
                 {"role": "system", "content": system_prompt},
+                *({"role": message.role, "content": message.content} for message in messages),
                 {"role": "user", "content": user_text},
-            ],
-            add_generation_prompt=True,
-            tokenize=False,
-            enable_thinking=False,  # requirement 2 -- see module docstring
-        )
+            ]
+            value: str = self._tok.apply_chat_template(
+                payload,
+                add_generation_prompt=True,
+                tokenize=False,
+                enable_thinking=False,
+            )
+            return value
+
+        base = render(())
+        if len(self._tok.encode(base)) > MAX_CONTEXT_TOKENS:
+            raise ValueError(
+                "system prompt plus current turn exceeds the 2,048-token context limit"
+            )
+
+        rendered = render(retained)
+        while len(self._tok.encode(rendered)) > MAX_CONTEXT_TOKENS:
+            retained = retained[2:]
+            rendered = render(retained)
         return rendered
 
-    def _prompt_cache(self, system_prompt: str) -> Any:
-        """Reuse the cache while the system prompt is unchanged; rebuild when it
-        moves.
-
-        The cache encodes a specific prefix. The Context Builder rewrites the
-        system prompt as FSRS state evolves, so reusing a cache built on prompt A
-        while sending prompt B would silently feed the model the wrong context --
-        a correctness bug that looks like a latency optimisation.
-        """
-        from mlx_lm.models.cache import make_prompt_cache
-
-        key = _prefix_key(system_prompt)
-        if self._cache is None or self._cache_key != key:
-            self._cache = make_prompt_cache(self._model)
-            self._cache_key = key
-        return self._cache
-
     def stream(
-        self, system_prompt: str, user_text: str, *, max_tokens: int = MAX_REPLY_TOKENS
+        self,
+        system_prompt: str,
+        user_text: str,
+        *,
+        history: Sequence[ChatMessage] = (),
+        max_tokens: int = MAX_REPLY_TOKENS,
     ) -> Iterator[str]:
         if self._model is None:
             raise RuntimeError("model not loaded -- call load() at startup, never per request")
         from mlx_lm import stream_generate
 
-        cache = self._prompt_cache(system_prompt)
         for chunk in stream_generate(
             self._model,
             self._tok,
-            self._render(system_prompt, user_text),
+            self._render(system_prompt, history, user_text),
             max_tokens=max_tokens,
-            prompt_cache=cache,
         ):
             yield chunk.text
 
     def generate(
-        self, system_prompt: str, user_text: str, *, max_tokens: int = MAX_REPLY_TOKENS
+        self,
+        system_prompt: str,
+        user_text: str,
+        *,
+        history: Sequence[ChatMessage] = (),
+        max_tokens: int = MAX_REPLY_TOKENS,
     ) -> str:
-        return "".join(self.stream(system_prompt, user_text, max_tokens=max_tokens)).strip()
+        return "".join(
+            self.stream(system_prompt, user_text, history=history, max_tokens=max_tokens)
+        ).strip()
 
 
 class StubLlm:
@@ -189,13 +222,30 @@ class StubLlm:
     def __init__(self, reply: str = "いいですね。何を食べましたか。") -> None:
         self.reply = reply
         self.calls: list[tuple[str, str]] = []
+        self.histories: list[tuple[ChatMessage, ...]] = []
 
-    def generate(self, system_prompt: str, user_text: str, *, max_tokens: int = 64) -> str:
+    def generate(
+        self,
+        system_prompt: str,
+        user_text: str,
+        *,
+        history: Sequence[ChatMessage] = (),
+        max_tokens: int = 64,
+    ) -> str:
         self.calls.append((system_prompt, user_text))
+        self.histories.append(tuple(history))
         return self.reply
 
-    def stream(self, system_prompt: str, user_text: str, *, max_tokens: int = 64) -> Iterator[str]:
+    def stream(
+        self,
+        system_prompt: str,
+        user_text: str,
+        *,
+        history: Sequence[ChatMessage] = (),
+        max_tokens: int = 64,
+    ) -> Iterator[str]:
         self.calls.append((system_prompt, user_text))
+        self.histories.append(tuple(history))
         yield from self.reply
 
     def status(self) -> LlmStatus:

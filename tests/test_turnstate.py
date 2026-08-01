@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from ocha.scheduling import ItemScheduler
 from ocha.turnstate import MAX_SILENT_GAP_S, TurnState, TurnTimeline
 from ocha.tutor.firewall import SENTINEL
 from ocha.tutor.grammar import load_grammar
-from ocha.tutor.llm import StubLlm
+from ocha.tutor.llm import ChatMessage, StubLlm
 from ocha.tutor.turn import run_turn
 
 
@@ -222,9 +223,16 @@ def test_current_turn_path_violates_g1a_at_realistic_latency(
     clock = FakeClock()
 
     class SlowStub(StubLlm):
-        def generate(self, s: str, u: str, *, max_tokens: int = 64) -> str:
+        def generate(
+            self,
+            s: str,
+            u: str,
+            *,
+            history: Sequence[ChatMessage] = (),
+            max_tokens: int = 64,
+        ) -> str:
             clock.advance(0.75)  # T0.9's measured first-sentence stage
-            return super().generate(s, u, max_tokens=max_tokens)
+            return super().generate(s, u, history=history, max_tokens=max_tokens)
 
     tl = timeline_with(clock)
     run_turn(conn, sched, load_grammar(), SlowStub(), "こんにちは。", timeline=tl)

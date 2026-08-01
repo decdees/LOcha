@@ -1,7 +1,7 @@
 """The client wire format (T2.1).
 
-ARCHITECTURE §2.3 chose a WebSocket transport because the client is native and
-already holds PCM. That choice makes the serializer ours, and the lazy option is
+ARCHITECTURE §2.3 chose a WebSocket transport because the PWA captures and plays
+PCM directly. That choice makes the serializer ours, and the lazy option is
 the WebSocket protocol's own frame types:
 
 - **binary frame = raw PCM**, 16 kHz mono signed 16-bit little-endian
@@ -30,7 +30,10 @@ Outbound JSON types, which are the client's entire non-audio contract:
 from __future__ import annotations
 
 import json
-from typing import Any
+import struct
+import uuid
+from enum import IntEnum
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pipecat.frames.frames import (
     Frame,
@@ -47,12 +50,46 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 
+if TYPE_CHECKING:
+    from ocha.speech.attribution import AudioAttribution
+
+
+class AudioAttributionSource(Protocol):
+    def pop_audio(self) -> AudioAttribution | None: ...
+
+
 SAMPLE_RATE = 16_000
 CHANNELS = 1
+AUDIO_MAGIC = b"OCH1"
+AUDIO_VERSION = 1
+AUDIO_HEADER = struct.Struct(">4sBBI16s")
+
+
+class AudioKind(IntEnum):
+    FILLER = 1
+    TUTOR = 2
+    REPAIR = 3
+
+
+def pack_audio(exchange_id: uuid.UUID, sequence: int, kind: AudioKind, pcm: bytes) -> bytes:
+    return AUDIO_HEADER.pack(AUDIO_MAGIC, AUDIO_VERSION, kind, sequence, exchange_id.bytes) + pcm
+
+
+def unpack_audio(data: bytes) -> tuple[uuid.UUID, int, AudioKind, bytes]:
+    if len(data) < AUDIO_HEADER.size:
+        raise ValueError("audio frame is shorter than the OCH1 header")
+    magic, version, kind, sequence, raw_uuid = AUDIO_HEADER.unpack_from(data)
+    if magic != AUDIO_MAGIC or version != AUDIO_VERSION:
+        raise ValueError("unsupported audio frame header")
+    return uuid.UUID(bytes=raw_uuid), sequence, AudioKind(kind), data[AUDIO_HEADER.size :]
 
 
 class OchaSerializer(FrameSerializer):
     """PCM on binary frames, JSON on text frames. See the module docstring."""
+
+    def __init__(self, attribution: AudioAttributionSource | None = None) -> None:
+        super().__init__()
+        self._attribution = attribution
 
     # The override ignore below is upstream's problem, not ours: BaseObject.setup takes
     # a BaseTaskManager and FrameSerializer.setup narrows it to a StartFrame, so any
@@ -71,12 +108,32 @@ class OchaSerializer(FrameSerializer):
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, OutputAudioRawFrame):
-            return frame.audio
+            pending = self._attribution.pop_audio() if self._attribution is not None else None
+            if pending is not None:
+                exchange_id = pending.exchange_id
+                sequence = pending.sequence
+                kind = AudioKind(pending.kind)
+            else:
+                try:
+                    exchange_id = uuid.UUID(str(frame.metadata["ocha.exchange_id"]))
+                    sequence = int(frame.metadata["ocha.seq"])
+                    kind = AudioKind(int(frame.metadata["ocha.audio_kind"]))
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise RuntimeError("outbound audio has no valid exchange attribution") from exc
+            return pack_audio(exchange_id, sequence, kind, frame.audio)
         if isinstance(frame, InterruptionFrame):
             # Barge-in: the client must drop whatever it has queued for playback,
             # otherwise the tutor keeps talking over the user for the length of
             # its buffer.
-            return json.dumps({"type": "interrupt"}, ensure_ascii=False)
+            try:
+                interrupt_exchange_id = str(uuid.UUID(str(frame.metadata["ocha.exchange_id"])))
+                sequence = int(frame.metadata["ocha.seq"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError("interrupt has no valid exchange attribution") from exc
+            return json.dumps(
+                {"type": "interrupt", "exchange_id": interrupt_exchange_id, "seq": sequence},
+                ensure_ascii=False,
+            )
         if isinstance(frame, OutputTransportMessageFrame | OutputTransportMessageUrgentFrame):
             # Everything non-audio arrives here. See `ClientText` below for why
             # transcripts and replies are transport messages rather than the text
@@ -87,10 +144,25 @@ class OchaSerializer(FrameSerializer):
     async def deserialize(self, data: str | bytes) -> Frame | None:
         if isinstance(data, bytes):
             return InputAudioRawFrame(audio=data, sample_rate=SAMPLE_RATE, num_channels=CHANNELS)
-        # The client sends no control messages yet. Text arriving here is a
-        # protocol change that has not been designed, so it is dropped rather
-        # than guessed at.
-        return None
+        try:
+            message = json.loads(data)
+            if message.get("type") != "client_metric":
+                return None
+            from ocha.speech.attribution import ClientMetricFrame
+
+            return ClientMetricFrame(
+                exchange_id=uuid.UUID(str(message["exchange_id"])),
+                event=message["event"],
+                sequence=int(message["seq"]),
+                client_time_ms=float(message["client_time_ms"]),
+                duration_ms=(
+                    float(message["duration_ms"])
+                    if message.get("duration_ms") is not None
+                    else None
+                ),
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
 
 
 def state_message(state: str) -> dict[str, Any]:

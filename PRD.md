@@ -27,11 +27,11 @@ The target learner is an absolute beginner in Japanese, aiming at travel and con
 
 | # | Goal | Measure |
 |---|---|---|
-| G1a | The conversation never *feels* broken | **No dead air exceeding 500 ms without visible or audible feedback** — transcript appearing, listening state, thinking state. **FAILING as of T2.6, and not for want of latency work.** Segmented whisper produces no interim transcripts, so `transcribing` is on screen unchanged for ~1.0 s and `thinking` for ~1.4 s. Whether a *static* indicator counts as feedback is a wording question this criterion has not answered; three options are set out in `benchmarks/voice-loop.md` and one of them needs deciding. The test is not being loosened to pass. |
-| G1b | Turn latency stays within a measured bound | **p50 voice-to-first-audio ≤ 3.2 s; p95 ≤ 4.6 s** — a regression bound. **NOT HELD as of T2.6: measured 3.73 s p50 through the real pipeline** (`benchmarks/voice-loop.md`). The bound was derived from a benchtop script; the pipeline is ~1.2 s slower because MLX generation blocks the event loop and pushed frames cannot be delivered. Recovery is a dedicated single-threaded inference worker (standing constraint 6's own prescription), not a looser bound. |
+| G1a | The conversation never *feels* broken | **UNPROVEN.** All 50 attributable iPhone turns must have no uncovered interval above 500 ms from the final sent speech sample through first tutor playback. Visible changes and scheduled filler/repair audio count; no events means the whole interval is silent. |
+| G1b | Turn latency stays within a measured bound | **UNPROVEN.** With all 50 iPhone turns attributable: p50 final-speech-sample to scheduled first tutor audio ≤ 3.2 s and nearest-rank p95 ≤ 4.6 s. Filler and repair audio are excluded. The historical 2.05 s result is invalid. |
 | G2 | Never teach incorrect grammar | 100% of grammar explanations served from curated reference, 0% from model generation |
 | G3 | Measure pitch accent per utterance | Three stable scores per turn: segmental, accent, rhythm. **Deferred post-October 2026 — see §10.** |
-| G4 | Schedule practice from production quality | FSRS rating derived from usage + pronunciation, not self-report |
+| G4 | Schedule practice from validated production quality | Only explicit graded drills may create FSRS ratings; free conversation records observations |
 | G5 | Zero recurring cost | No cloud API in any code path |
 
 ## 4. Non-goals
@@ -71,12 +71,12 @@ Single user, self-hosting. Design parameters that drive functional requirements:
 
 ### FR-3 — Conversation
 - LLM replies in Japanese, 1–2 sentences maximum, enforced by both prompt and `max_tokens`.
-- Vocabulary constrained to the user's known-item pool. At most one new word per turn, glossed in English.
+- Vocabulary steered toward the user's known-item pool. At most one new word per turn is requested and glossed in English; this is model steering, not deterministic enforcement.
 - Never breaks character to explain grammar (see FR-5).
 
 ### FR-4 — Speech output
 - Japanese TTS with deterministic, inspectable pitch accent.
-- Streaming: synthesis begins on the first complete sentence, not the full response.
+- Accuracy-first quarantine: synthesis begins only after the complete model response passes the firewall, then proceeds sentence by sentence.
 
 ### FR-5 — Grammar firewall *(critical)*
 - The model emits the literal sentinel `[GRAMMAR_QUERY]` when asked a grammar question.
@@ -113,8 +113,9 @@ Single user, self-hosting. Design parameters that drive functional requirements:
 - `interference_warning: true` surfaces the entry prominently — these are the traps where Hindi intuition actively misleads.
 
 ### FR-8 — Scheduling
-- FSRS via `py-fsrs`. Ratings derived, never self-reported.
-- Derivation table:
+- FSRS via `py-fsrs`. Ratings come only from explicit validated drills, never from free conversation or self-report.
+- Free conversation stores `mentioned` or `mentioned_after_prompt` observations. Morphological occurrence is not evidence of grammatical correctness.
+- Future validated drill derivation (out of scope for this cycle):
 
   | Signal | Rating |
   |---|---|
@@ -152,7 +153,7 @@ The original G1 (p50 < 1200 ms) was written before anything was measured and had
 
 Replacing 1200 ms with a different single number would repeat the mistake. G1 is therefore split, because the original conflated two questions that have different answers and different fixes:
 
-**G1a — does it feel broken?** This is the one that decides whether the product is usable, and it is *not* a function of total latency. A silent 3-second gap reads as a crash; 3 seconds with the transcript appearing as you speak, then a visible thinking state, reads as a tutor considering their answer. **G1a is achievable today at the measured 3.03 s**, and it makes the feedback states (T2.8) load-bearing rather than polish.
+**G1a — does it feel broken?** This is the one that decides whether the product is usable, and it is *not* a function of total latency. It remains unproven until the v2 instrument records 50 unambiguous iPhone exchanges. Visible-change timestamps and the union of scheduled audio intervals determine uncovered gaps; static labels and absent events receive no invented credit.
 
 **G1b — is it getting worse?** A ceiling grounded in measurement:
 
@@ -169,9 +170,9 @@ This is a **regression bound, not an aspiration** — it says "do not get worse"
 
 **Phase 0 is successful if** it produces a written benchmark report with measured CER per ASR candidate and measured tok/s per LLM candidate on this specific machine. No code beyond benchmark scripts.
 
-**Phase 1 is successful if** a scripted 10-turn exchange against `POST /turn` (curl or a test harness — there is no client) keeps vocabulary within the known pool, updates FSRS state correctly, and routes every grammar question through the firewall. Phase 1 is a build-order step, not a shippable state.
+**Phase 1 is successful if** a scripted 10-turn exchange against `POST /turn` steers vocabulary toward the known pool, records inspectable observations without mutating FSRS, and routes every marked grammar question through the firewall. Phase 1 is a build-order step, not a shippable state.
 
-**Phase 2 is successful if** G1a holds over 50 real turns — no dead air beyond 500 ms without feedback — and p50 voice-to-first-audio stays within the G1b bound. The original "under 1200 ms" criterion is retired: T0.9 measured 3.03 s on the shipped configuration and no combination of built components reaches 1200 ms on this hardware.
+**Phase 2 is successful if** all 50 spoken iPhone turns have unambiguous v2 attribution, G1a holds on every turn, and G1b meets both p50 and nearest-rank p95 bounds. Rejected ASR turns and instrument failures are reported, never removed from the run.
 
 **Phase 3 is successful if** accent scores separate deliberately-correct from deliberately-wrong pitch patterns on a hand-built 20-utterance test set. *(Post-October 2026.)*
 
@@ -195,14 +196,14 @@ This is a **regression bound, not an aspiration** — it says "do not get worse"
 
 ### Why Phase 1 is not a milestone
 
-The product thesis is that text-based Japanese apps are ineffective and that spoken production practice is the entire reason Ocha exists. A text-only Ocha is therefore not a smaller version of the product — it is a rebuild of the thing being rejected. Phase 1 is first in build *order* for one reason: the Context Builder, FSRS rating derivation, and grammar firewall are pure logic, and debugging pure logic through a streaming audio pipeline costs far more than debugging it over curl. It is a step. It does not ship.
+The product thesis is that text-based Japanese apps are ineffective and that spoken production practice is the entire reason Ocha exists. A text-only Ocha is therefore not a smaller version of the product. Phase 1 is first in build order because context construction, conservative observation and the grammar firewall are pure logic. It is a step. It does not ship.
 
 ### The deliberate trade
 
 Voice conversation and pitch-accent scoring cannot both ship before a hard external deadline in October 2026. Voice wins, because without it there is no product. Consequences, accepted with eyes open:
 
 - Until Phase 3 lands, Ocha's stated differentiator is not shipping. The honest interim claim is "free, self-hosted, vocabulary-constrained spoken practice," not "the app that measures pitch accent."
-- The FR-8 accent cap stays inert, so FSRS ratings derive from usage alone. A word produced with wrong accent will be scheduled as known. This is a known, accepted inaccuracy in the scheduler, not an oversight.
+- Free conversation does not rate FSRS at all. Explicit validated drills are the only future rating source, and their design is deferred with pronunciation assessment.
 - Phase 2 must not foreclose Phase 3: `utterances` retains raw 16 kHz audio and the `pronunciation_scores` table ships empty in Phase 1 rather than being added later.
 
 This is a trade, not an omission.

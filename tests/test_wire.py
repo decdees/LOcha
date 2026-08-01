@@ -1,6 +1,6 @@
 """T2.1 — the client wire format.
 
-These assertions are the client's contract. The iOS app is a separate codebase
+These assertions are the client's contract. The PWA is a separate codebase
 that cannot be typechecked against this one, so a silent change here shows up on
 the phone as audio that is silent, sped up, or state that never updates. Every
 field the app reads is pinned by a test.
@@ -9,6 +9,7 @@ field the app reads is pinned by a test.
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
 from pipecat.frames.frames import (
@@ -23,13 +24,17 @@ from pipecat.frames.frames import (
 )
 from pipecat.tests.utils import run_test
 
+from ocha.speech.attribution import AttributionState
 from ocha.speech.wire import (
+    AUDIO_HEADER,
     CHANNELS,
     SAMPLE_RATE,
+    AudioKind,
     ClientText,
     OchaSerializer,
     _client_message,
     state_message,
+    unpack_audio,
 )
 
 
@@ -46,11 +51,35 @@ async def test_binary_in_is_pcm_at_the_pinned_rate(ser: OchaSerializer) -> None:
     assert frame.audio == b"\x01\x02" * 160
 
 
-async def test_audio_out_is_bare_pcm(ser: OchaSerializer) -> None:
-    """No header, no envelope. The client reads bytes straight into a buffer."""
+async def test_audio_out_has_a_fixed_attribution_header(ser: OchaSerializer) -> None:
     pcm = OutputAudioRawFrame(audio=b"\xff\x00", sample_rate=16_000, num_channels=1)
+    exchange_id = uuid.uuid4()
+    pcm.metadata.update({"ocha.exchange_id": str(exchange_id), "ocha.seq": 7, "ocha.audio_kind": 2})
     out = await ser.serialize(pcm)
-    assert out == b"\xff\x00"
+    assert isinstance(out, bytes)
+    assert len(out) == AUDIO_HEADER.size + 2
+    assert unpack_audio(out) == (exchange_id, 7, AudioKind.TUTOR, b"\xff\x00")
+
+
+async def test_unattributed_audio_is_an_instrument_failure(ser: OchaSerializer) -> None:
+    pcm = OutputAudioRawFrame(audio=b"\xff\x00", sample_rate=16_000, num_channels=1)
+    with pytest.raises(RuntimeError, match="attribution"):
+        await ser.serialize(pcm)
+
+
+async def test_audio_attribution_survives_transport_frame_reconstruction() -> None:
+    state = AttributionState()
+    exchange_id = state.start().exchange_id
+    state.enqueue_audio(exchange_id, sequence=7, kind=AudioKind.REPAIR)
+    serializer = OchaSerializer(state)
+
+    # FastAPIWebsocketOutputTransport constructs a fresh OutputAudioRawFrame,
+    # discarding the source frame's metadata immediately before serialization.
+    reconstructed = OutputAudioRawFrame(audio=b"\x01\x02", sample_rate=SAMPLE_RATE, num_channels=1)
+    encoded = await serializer.serialize(reconstructed)
+
+    assert isinstance(encoded, bytes)
+    assert unpack_audio(encoded) == (exchange_id, 7, AudioKind.REPAIR, b"\x01\x02")
 
 
 def test_transcript_carries_the_final_flag() -> None:
@@ -99,7 +128,14 @@ async def test_japanese_is_not_escaped(ser: OchaSerializer) -> None:
 
 async def test_interruption_reaches_the_client(ser: OchaSerializer) -> None:
     """Barge-in is useless if the client keeps playing its queue."""
-    assert json.loads(await ser.serialize(InterruptionFrame()) or "") == {"type": "interrupt"}
+    frame = InterruptionFrame()
+    exchange_id = uuid.uuid4()
+    frame.metadata.update({"ocha.exchange_id": str(exchange_id), "ocha.seq": 9})
+    assert json.loads(await ser.serialize(frame) or "") == {
+        "type": "interrupt",
+        "exchange_id": str(exchange_id),
+        "seq": 9,
+    }
 
 
 async def test_transport_messages_pass_through_verbatim(ser: OchaSerializer) -> None:
@@ -110,6 +146,27 @@ async def test_transport_messages_pass_through_verbatim(ser: OchaSerializer) -> 
 
 async def test_client_text_is_dropped_not_guessed(ser: OchaSerializer) -> None:
     assert await ser.deserialize('{"type": "hello"}') is None
+
+
+async def test_client_playback_metric_is_typed(ser: OchaSerializer) -> None:
+    from ocha.speech.attribution import ClientMetricFrame
+
+    exchange_id = uuid.uuid4()
+    frame = await ser.deserialize(
+        json.dumps(
+            {
+                "type": "client_metric",
+                "exchange_id": str(exchange_id),
+                "event": "playback_duration",
+                "seq": 4,
+                "client_time_ms": 1200.5,
+                "duration_ms": 320.0,
+            }
+        )
+    )
+    assert isinstance(frame, ClientMetricFrame)
+    assert frame.exchange_id == exchange_id
+    assert frame.duration_ms == 320.0
 
 
 async def test_setup_rejects_a_rate_mismatch(ser: OchaSerializer) -> None:

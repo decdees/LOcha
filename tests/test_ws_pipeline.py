@@ -50,8 +50,9 @@ from pipecat.utils.time import time_now_iso8601
 from ocha.db import connect, migrate
 from ocha.db.seed import seed
 from ocha.scheduling import ItemScheduler
-from ocha.speech.asr import HALLUCINATIONS
+from ocha.speech.asr import AsrRejectedFrame, decide_transcript
 from ocha.speech.probe import TurnStateProbe
+from ocha.speech.repair import REPAIR_TEXT, AsrRepairProcessor, RepairAudioFrame
 from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.tutor_stage import TutorStage
 from ocha.speech.wire import SAMPLE_RATE
@@ -87,8 +88,10 @@ class StubWhisper(SegmentedSTTService):
         self.segments.append(len(audio))
         # The real service's hallucination guard, applied here too -- a stub that
         # skips it would let the guard rot without any test noticing.
-        if any(h in self.transcript for h in HALLUCINATIONS):
-            yield None
+        decision = decide_transcript(self.transcript)
+        if not decision.accepted:
+            assert decision.reason is not None
+            yield AsrRejectedFrame(text=decision.text, reason=decision.reason)
             return
         yield TranscriptionFrame(self.transcript, "", time_now_iso8601(), language=Language.JA)
 
@@ -131,6 +134,7 @@ class Rig:
             [
                 VADProcessor(vad_analyzer=SileroVADAnalyzer()),
                 self.asr,
+                AsrRepairProcessor(b"\x00\x00" * 160, SAMPLE_RATE),
                 TutorStage(conn, ItemScheduler(conn), load_grammar(), llm),
                 self.tts,
                 self.probe,
@@ -229,7 +233,27 @@ async def test_the_firewall_holds_over_the_voice_path(db: sqlite3.Connection) ->
     assert not any(isinstance(f, TTSAudioRawFrame) for f in rig.down), "audio for a grammar answer"
 
 
-async def test_a_hallucinated_transcript_is_dropped(db: sqlite3.Connection) -> None:
+@pytest.mark.parametrize(
+    "reply",
+    [
+        f"これは普通の返事です。{SENTINEL} は話題を示します。",
+        f"一文目です。二文目です。{SENTINEL}",
+        "一文目です。GRAMMAR_QUERY は話題を示します。",
+    ],
+)
+async def test_a_late_sentinel_quarantines_the_complete_voice_reply(
+    db: sqlite3.Connection, reply: str
+) -> None:
+    rig = Rig(db, StubLlm(reply=reply))
+    await rig.speak()
+
+    assert not rig.tts.spoken, f"model text escaped before the firewall: {rig.tts.spoken}"
+    assert not any(isinstance(f, TTSAudioRawFrame) for f in rig.down)
+
+
+async def test_a_hallucinated_transcript_requests_a_visible_retry(
+    db: sqlite3.Connection,
+) -> None:
     """Whisper invents 「ご視聴ありがとうございました」 on near-silence.
 
     Observed twice in an 8-turn end-to-end run. An invented utterance is worse
@@ -240,3 +264,16 @@ async def test_a_hallucinated_transcript_is_dropped(db: sqlite3.Connection) -> N
     rig.asr.transcript = "ご視聴ありがとうございました"
     await rig.speak()
     assert not rig.tts.spoken, "the tutor replied to a hallucination"
+    rejected = [m for m in rig.messages() if m.get("type") == "asr_rejected"]
+    assert rejected == [
+        {
+            "type": "asr_rejected",
+            "reason": "known_hallucination",
+            "text": "ご視聴ありがとうございました",
+            "repair_text": REPAIR_TEXT,
+        }
+    ]
+    assert any(isinstance(frame, RepairAudioFrame) for frame in rig.down)
+    assert db.execute("SELECT count(*) FROM turns").fetchone()[0] == 0
+    assert db.execute("SELECT count(*) FROM item_observations").fetchone()[0] == 0
+    assert db.execute("SELECT count(*) FROM reviews").fetchone()[0] == 0

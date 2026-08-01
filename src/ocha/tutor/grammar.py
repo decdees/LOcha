@@ -12,11 +12,10 @@ and discovering it mid-conversation means the firewall has nothing to serve.
 from __future__ import annotations
 
 import json
+from importlib import resources
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-DEFAULT_PATH = Path("data/grammar.json")
 
 NOT_DOCUMENTED = "This grammar point is not yet documented."
 
@@ -67,12 +66,20 @@ class GrammarReference:
         return [e.id for e in self._by_id.values() if e.interference_warning]
 
 
-def load_grammar(path: Path | str = DEFAULT_PATH) -> GrammarReference:
+def load_grammar(path: Path | str | None = None) -> GrammarReference:
     """Load and validate. Raises on any malformed entry -- fail fast, loudly."""
-    p = Path(path)
-    raw = json.loads(p.read_text(encoding="utf-8"))
+    if path is None:
+        source = "ocha.resources/grammar.json"
+        text = (
+            resources.files("ocha.resources").joinpath("grammar.json").read_text(encoding="utf-8")
+        )
+    else:
+        p = Path(path)
+        source = str(p)
+        text = p.read_text(encoding="utf-8")
+    raw = json.loads(text)
     if "entries" not in raw:
-        raise ValueError(f"{p}: missing top-level 'entries'")
+        raise ValueError(f"{source}: missing top-level 'entries'")
 
     entries: list[GrammarEntry] = []
     problems: list[str] = []
@@ -84,5 +91,5 @@ def load_grammar(path: Path | str = DEFAULT_PATH) -> GrammarReference:
             problems.append(f"  {got}: {exc.error_count()} error(s) -- {exc.errors()[0]['msg']}")
 
     if problems:
-        raise ValueError(f"{p}: {len(problems)} malformed entr(ies)\n" + "\n".join(problems))
+        raise ValueError(f"{source}: {len(problems)} malformed entr(ies)\n" + "\n".join(problems))
     return GrammarReference(entries)

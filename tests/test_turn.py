@@ -195,33 +195,63 @@ def _a_target(sched: ItemScheduler) -> str:
     return names[ctx.target_ids[0]]
 
 
-def test_usage_produces_a_rating(env: tuple[sqlite3.Connection, ItemScheduler]) -> None:
+def test_usage_produces_an_observation_without_a_rating(
+    env: tuple[sqlite3.Connection, ItemScheduler],
+) -> None:
     conn, sched = env
     _known(sched, 6)
     word = _a_target(sched)
     # the tutor elicits it, then the learner produces it
-    run_turn(conn, sched, load_grammar(), StubLlm(reply=f"{word}はいいですね。"), "こんにちは。")
-    res = run_turn(
-        conn, sched, load_grammar(), StubLlm(reply="そうですか。"), f"{word}が好きです。"
+    first = run_turn(
+        conn, sched, load_grammar(), StubLlm(reply=f"{word}はいいですね。"), "こんにちは。"
     )
-    assert res.ratings, "producing an elicited target must yield a rating"
-    assert res.usage, res.usage
+    res = run_turn(
+        conn,
+        sched,
+        load_grammar(),
+        StubLlm(reply="そうですか。"),
+        f"{word}が好きです。",
+        session_id=first.session_id,
+    )
+    assert res.observations, "producing an elicited target must be observable"
+    assert set(res.observations.values()) == {"mentioned_after_prompt"}
+    assert res.ratings == {}
+    assert res.usage == {}
+
+
+def test_consecutive_turns_pass_four_explicit_complete_exchanges(
+    env: tuple[sqlite3.Connection, ItemScheduler],
+) -> None:
+    conn, sched = env
+    llm = StubLlm(reply="最初の返答です。")
+    first = run_turn(conn, sched, load_grammar(), llm, "最初の質問です。")
+
+    for n in range(1, 6):
+        llm.reply = f"返答{n}です。"
+        run_turn(
+            conn,
+            sched,
+            load_grammar(),
+            llm,
+            f"質問{n}です。",
+            session_id=first.session_id,
+        )
+
+    history = llm.histories[-1]
+    assert len(history) == 8
+    assert [message.role for message in history] == ["user", "assistant"] * 4
+    assert history[0].content == "質問1です。"
+    assert history[-1].content == "返答4です。"
+    assert all("You are a Japanese conversation partner" not in m.content for m in history)
 
 
 # ---- the 10-turn integration test --------------------------------------
 
 
-def test_ten_turn_conversation_evolves_fsrs_state(
+def test_ten_turn_free_conversation_never_evolves_fsrs_state(
     env: tuple[sqlite3.Connection, ItemScheduler],
 ) -> None:
-    """T1.8 acceptance: drive a 10-turn conversation and assert FSRS state evolves.
-
-    The stub re-reads the current target each turn instead of repeating one reply.
-    A fixed reply only ever elicits one item, and once that item is reviewed it
-    leaves the target set -- so the conversation scored exactly one review and
-    neither the hinted nor the avoided path was exercised past turn one. A real
-    tutor steers toward whatever is currently due, so the stub must too.
-    """
+    """Free conversation creates evidence, never inferred spaced-repetition reviews."""
     conn, sched = env
     ref = load_grammar()
     _known(sched, 10)
@@ -245,25 +275,41 @@ def test_ten_turn_conversation_evolves_fsrs_state(
         == 10
     )
 
-    # FSRS state moved.
+    # FSRS state did not move: only a validated drill may rate recall.
     reps_after = conn.execute("SELECT sum(reps) FROM items").fetchone()[0]
-    assert reps_after > reps_before, "10 turns must produce reviews"
+    assert reps_after == reps_before
 
     # Reviews are attributable to the session that produced them.
-    turn_reviews = conn.execute(
-        "SELECT rating, source FROM reviews WHERE source LIKE 'turn:%'"
-    ).fetchall()
-    assert turn_reviews
-    assert all(r["source"] == f"turn:session{session}" for r in turn_reviews)
-
-    # Both directions represented: dodging an elicited item must cost the learner,
-    # producing one must reward them.
-    ratings = [r["rating"] for r in turn_reviews]
-    assert min(ratings) <= 2, f"avoidance must produce Again/Hard, got {sorted(set(ratings))}"
-    assert max(ratings) >= 2, f"production must be rated, got {sorted(set(ratings))}"
-
-    # Due dates are real forward-moving timestamps, not left at the seeded value.
-    assert conn.execute("SELECT count(*) FROM items WHERE due > '2026-08'").fetchone()[0] > 0
+    assert (
+        conn.execute("SELECT count(*) FROM reviews WHERE source LIKE 'turn:%'").fetchone()[0] == 0
+    )
+    assert conn.execute("SELECT count(*) FROM item_observations").fetchone()[0] > 0
 
     # The firewall never fired -- none of these turns was a grammar question.
     assert conn.execute("SELECT sum(grammar_query) FROM turns").fetchone()[0] == 0
+
+
+def test_malformed_japanese_is_only_an_observation(
+    env: tuple[sqlite3.Connection, ItemScheduler],
+) -> None:
+    conn, sched = env
+    item = conn.execute("SELECT * FROM items WHERE content = '食べる'").fetchone()
+    assert item is not None
+    conn.execute("UPDATE items SET due = '2000-01-01T00:00:00+00:00' WHERE id = ?", (item["id"],))
+    item = conn.execute("SELECT * FROM items WHERE id = ?", (item["id"],)).fetchone()
+    assert item is not None
+    before = tuple(item[key] for key in ("reps", "stability", "due", "lapses"))
+
+    res = run_turn(
+        conn,
+        sched,
+        load_grammar(),
+        StubLlm(reply="そうですか。"),
+        "ご飯を食べるです。",
+    )
+
+    assert res.observations[item["id"]] == "mentioned"
+    after = conn.execute("SELECT * FROM items WHERE id = ?", (item["id"],)).fetchone()
+    assert tuple(after[key] for key in ("reps", "stability", "due", "lapses")) == before
+    assert res.ratings == {}
+    assert res.usage == {}

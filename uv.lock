@@ -1143,6 +1143,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fsrs" },
     { name = "fugashi" },
+    { name = "huggingface-hub" },
     { name = "mlx" },
     { name = "mlx-lm" },
     { name = "pipecat-ai", extra = ["mlx-whisper", "websocket"] },
@@ -1152,7 +1153,6 @@ dependencies = [
 
 [package.dev-dependencies]
 bench = [
-    { name = "huggingface-hub" },
     { name = "jiwer" },
     { name = "mlx-whisper" },
     { name = "parakeet-mlx" },
@@ -1170,6 +1170,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fsrs", specifier = ">=6.3.1" },
     { name = "fugashi", specifier = ">=1.5.2" },
+    { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "mlx", specifier = ">=0.32.0" },
     { name = "mlx-lm", specifier = ">=0.31.3" },
     { name = "pipecat-ai", extras = ["silero", "websocket", "mlx-whisper"], specifier = ">=1.6.0" },
@@ -1179,7 +1180,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 bench = [
-    { name = "huggingface-hub", specifier = ">=0.26" },
     { name = "jiwer", specifier = ">=3.0" },
     { name = "mlx-whisper", specifier = ">=0.4" },
     { name = "parakeet-mlx", specifier = ">=0.5.2" },

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -64,16 +65,21 @@ def test_real_grammar_question_is_firewalled(client: TestClient) -> None:
     assert "GRAMMAR_QUERY" not in r.text
 
 
-def test_kv_cache_makes_later_turns_faster(client: TestClient) -> None:
-    """T0.4 measured 1.81 s -> 0.50 s flat. The second turn reuses the prefix."""
-    import time
+def test_real_consecutive_turn_uses_explicit_history(client: TestClient) -> None:
+    first = client.post("/turn", json={"text": "水が好きです。"})
+    assert first.status_code == 200, first.text
+    second = client.post(
+        "/turn",
+        json={"text": "どうしてだと思いますか。", "session_id": first.json()["session_id"]},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["reply"]
 
-    def turn(text: str) -> float:
-        t = time.perf_counter()
-        assert client.post("/turn", json={"text": text}).status_code == 200
-        return time.perf_counter() - t
 
-    turn("こんにちは。")  # warms the prefix cache
-    first = turn("水を飲みました。")
-    second = turn("コーヒーが好きです。")
-    assert second < first * 2.0, f"cache reuse looks broken: {first:.2f}s then {second:.2f}s"
+def test_health_during_real_generation_stays_on_the_worker(client: TestClient) -> None:
+    """Generation and MLX-backed status calls serialize on the one owner thread."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        turn = pool.submit(client.post, "/turn", json={"text": "今日は何を食べましたか。"})
+        health = pool.submit(client.get, "/health")
+        assert health.result(timeout=30).status_code == 200
+        assert turn.result(timeout=30).status_code == 200

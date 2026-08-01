@@ -28,7 +28,11 @@ something already paid for it.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from pipecat.frames.frames import Frame, TranscriptionFrame
@@ -38,6 +42,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 from ocha.inference import InferenceWorker
+from ocha.models import resolve_cached_model
 from ocha.speech.wire import SAMPLE_RATE
 
 MODEL = "mlx-community/whisper-large-v3-mlx"
@@ -93,9 +98,38 @@ LOOP_COVERAGE = 0.7
 HALLUCINATIONS = (
     "ご視聴ありがとうございました",
     "ご視聴ありがとうございます",
-    "おやすみなさい",
     "チャンネル登録",
 )
+
+AsrRejectReason = Literal["known_hallucination", "decoder_loop"]
+
+
+@dataclass(frozen=True, slots=True)
+class AsrDecision:
+    text: str
+    accepted: bool
+    reason: AsrRejectReason | None = None
+
+
+@dataclass
+class AsrRejectedFrame(Frame):
+    text: str
+    reason: AsrRejectReason
+
+
+def _normalized(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).strip().rstrip("。！？.!?").strip()
+
+
+def decide_transcript(text: str) -> AsrDecision:
+    """Classify a transcript without silently consuming suspicious speech."""
+    cleaned = text.strip()
+    normalized = _normalized(cleaned)
+    if normalized in {_normalized(value) for value in HALLUCINATIONS}:
+        return AsrDecision(cleaned, False, "known_hallucination")
+    if is_looping(normalized):
+        return AsrDecision(cleaned, False, "decoder_loop")
+    return AsrDecision(cleaned, True)
 
 
 class OchaWhisper(SegmentedSTTService):
@@ -109,6 +143,7 @@ class OchaWhisper(SegmentedSTTService):
         # you to ignore error-level lines.
         super().__init__(settings=STTSettings(model=model, language=LANGUAGE), **kwargs)  # type: ignore[arg-type]
         self._model = model
+        self._model_path: Path | None = None
         # None only in tests that never load MLX. In the app it is always set, and
         # `_transcribe` running inline is a thread-affinity bug waiting to happen.
         self._worker = worker
@@ -126,9 +161,10 @@ class OchaWhisper(SegmentedSTTService):
         """
         import mlx_whisper
 
+        self._model_path = resolve_cached_model(self._model)
         mlx_whisper.transcribe(
             np.zeros(int(0.1 * (self.sample_rate or SAMPLE_RATE)), dtype=np.float32),
-            path_or_hf_repo=self._model,
+            path_or_hf_repo=self._model_path,
             language=LANGUAGE,
         )
 
@@ -147,22 +183,26 @@ class OchaWhisper(SegmentedSTTService):
 
         # int16 -> float32 in [-1, 1). Dividing by 32768 rather than 32767 keeps
         # the mapping exact in binary and matches what whisper's own loader does.
-        text = await self._transcribe(samples)
-        if any(h in text for h in HALLUCINATIONS) or is_looping(text):
+        decision = decide_transcript(await self._transcribe(samples))
+        if not decision.accepted:
+            assert decision.reason is not None
+            yield AsrRejectedFrame(text=decision.text, reason=decision.reason)
+            return
+        if not decision.text:
             yield None
             return
-        if not text:
-            yield None
-            return
-        yield TranscriptionFrame(text, "", time_now_iso8601(), language=LANGUAGE)
+        yield TranscriptionFrame(decision.text, "", time_now_iso8601(), language=LANGUAGE)
 
     async def _transcribe(self, samples: np.ndarray) -> str:
         def work() -> str:
             import mlx_whisper
 
+            if self._model_path is None:
+                self._model_path = resolve_cached_model(self._model)
+
             result = mlx_whisper.transcribe(
                 samples.astype(np.float32) / 32768.0,
-                path_or_hf_repo=self._model,
+                path_or_hf_repo=self._model_path,
                 language=LANGUAGE,
                 condition_on_previous_text=CONDITION_ON_PREVIOUS_TEXT,
             )

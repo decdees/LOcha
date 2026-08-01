@@ -40,8 +40,15 @@ from pipecat.transports.websocket.fastapi import (
 
 from ocha.scheduling.scheduler import ItemScheduler
 from ocha.speech.asr import OchaWhisper
+from ocha.speech.attribution import (
+    AttributionInputProcessor,
+    AttributionState,
+    ExchangeEndpointProcessor,
+    OutputAttributionProcessor,
+)
 from ocha.speech.filler import FillerBank, FillerProcessor, FillerState
 from ocha.speech.probe import Spans, TurnStateProbe
+from ocha.speech.repair import AsrRepairProcessor
 from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.tutor_stage import TutorStage
 from ocha.speech.wire import CHANNELS, SAMPLE_RATE, ClientText, OchaSerializer
@@ -68,7 +75,9 @@ from ocha.tutor.llm import LlmService
 VAD_PARAMS = VADParams(stop_secs=0.6)
 
 
-def build_transport(websocket: WebSocket) -> FastAPIWebsocketTransport:
+def build_transport(
+    websocket: WebSocket, attribution: AttributionState | None = None
+) -> FastAPIWebsocketTransport:
     return FastAPIWebsocketTransport(
         websocket=websocket,
         params=FastAPIWebsocketParams(
@@ -81,7 +90,7 @@ def build_transport(websocket: WebSocket) -> FastAPIWebsocketTransport:
             # No WAV header: the client is ours and reads raw PCM. A header per
             # chunk would be 44 bytes of nothing on every 10 ms of audio.
             add_wav_header=False,
-            serializer=OchaSerializer(),
+            serializer=OchaSerializer(attribution),
         ),
     )
 
@@ -106,10 +115,25 @@ class _Loopback(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-def build_loopback(transport: FastAPIWebsocketTransport) -> tuple[Pipeline, TurnStateProbe]:
+def build_loopback(
+    transport: FastAPIWebsocketTransport, attribution: AttributionState | None = None
+) -> tuple[Pipeline, TurnStateProbe]:
     """Audio in, same audio out. No VAD, no models. The by-ear audio check."""
     probe = TurnStateProbe(emit_state=True)
-    return Pipeline([transport.input(), _Loopback(), probe, transport.output()]), probe
+    attribution = attribution or AttributionState()
+    return (
+        Pipeline(
+            [
+                transport.input(),
+                AttributionInputProcessor(attribution),
+                _Loopback(),
+                probe,
+                OutputAttributionProcessor(attribution),
+                transport.output(),
+            ]
+        ),
+        probe,
+    )
 
 
 def build_pipeline(
@@ -122,6 +146,8 @@ def build_pipeline(
     asr: SegmentedSTTService | None = None,
     tts: FrameProcessor | None = None,
     fillers: FillerBank | None = None,
+    repair_audio: bytes | None = None,
+    attribution: AttributionState | None = None,
 ) -> tuple[Pipeline, TurnStateProbe]:
     """The real loop. `asr`/`tts` are injectable so tests can run it without MLX.
 
@@ -146,6 +172,7 @@ def build_pipeline(
     """
     spans = Spans()
     timeline = TurnTimeline()
+    attribution = attribution or AttributionState()
     taps = [TurnStateProbe(timeline=timeline, spans=spans, emit_state=True) for _ in range(4)]
     after_vad, after_asr, after_tutor, tail = taps
 
@@ -166,17 +193,21 @@ def build_pipeline(
         Pipeline(
             [
                 transport.input(),
+                AttributionInputProcessor(attribution),
                 VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VAD_PARAMS)),
+                ExchangeEndpointProcessor(attribution),
                 after_vad,
                 *trigger,
                 asr if asr is not None else OchaWhisper(),
                 after_asr,
+                AsrRepairProcessor(repair_audio, SAMPLE_RATE),
                 TutorStage(conn, scheduler, reference, llm),
                 after_tutor,
                 tts if tts is not None else VoicevoxTTS(),
                 *emit,
                 tail,
                 ClientText(),
+                OutputAttributionProcessor(attribution),
                 transport.output(),
             ]
         ),
@@ -195,18 +226,29 @@ async def run_session(
     asr: SegmentedSTTService | None = None,
     tts: FrameProcessor | None = None,
     fillers: FillerBank | None = None,
+    repair_audio: bytes | None = None,
 ) -> TurnStateProbe:
     """Serve one client connection for its whole life. Returns the probe.
 
     The probe is returned rather than logged so the caller decides what to do
     with the measurement -- T2.6 writes it to a report, tests assert on it.
     """
-    transport = build_transport(websocket)
+    attribution = AttributionState()
+    transport = build_transport(websocket, attribution)
     if loopback:
-        pipeline, probe = build_loopback(transport)
+        pipeline, probe = build_loopback(transport, attribution)
     else:
         pipeline, probe = build_pipeline(
-            transport, conn, scheduler, reference, llm, asr=asr, tts=tts, fillers=fillers
+            transport,
+            conn,
+            scheduler,
+            reference,
+            llm,
+            asr=asr,
+            tts=tts,
+            fillers=fillers,
+            repair_audio=repair_audio,
+            attribution=attribution,
         )
     # PipelineWorker/WorkerRunner, not PipelineTask/PipelineRunner: the latter pair
     # is deprecated as of Pipecat 1.3 and removed at 2.0. Same objects, new names.
@@ -230,4 +272,5 @@ async def run_session(
     # auto_end (the default) ends the runner when the pipeline ends, which for one
     # runner per connection is exactly the client disconnecting.
     await runner.run()
+    attribution.finalize()
     return probe

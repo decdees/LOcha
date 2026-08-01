@@ -1,0 +1,169 @@
+{
+  "_schema": "PRD FR-7. Hand-authored. Never generated -- the firewall (FR-5) serves from here or says 'not yet documented'.",
+  "_fields": {
+    "id": "stable key, also the FSRS item id for grammar-kind items",
+    "en": "the explanation shown to the user",
+    "examples": "minimal contrasting pairs where possible",
+    "hindi_contrast": "OPTIONAL. Present only where the analogy genuinely holds.",
+    "interference_warning": "true where Hindi intuition actively misleads",
+    "source": "where this was checked against"
+  },
+  "entries": [
+    {
+      "id": "particle_wa_ga",
+      "en": "は marks the topic — what the sentence is about, often already known. が marks the subject as new, identified, or the answer to a question.",
+      "examples": ["私は学生です。 (As for me, I'm a student.)", "誰が来ましたか。 (Who came?) — answer: 田中さんが来ました。"],
+      "hindi_contrast": "は is closer to तो in 'मैं तो छात्र हूँ'. NOT ने — ने is ergative and marks the agent of a completed transitive verb, which Japanese does not do at all.",
+      "interference_warning": true,
+      "source": "Tae Kim §3.1; DoJG p.516"
+    },
+    {
+      "id": "particle_wa_mo",
+      "en": "は marks a topic in contrast to others. も replaces it to mean 'also' or 'too' — it never stacks with は.",
+      "examples": ["私は行きます。 (I'm going.)", "私も行きます。 (I'm going too.)"],
+      "hindi_contrast": "も corresponds closely to भी. 'मैं भी जाऊँगा' is exactly 私も行きます.",
+      "interference_warning": false,
+      "source": "Tae Kim §3.1.4"
+    },
+    {
+      "id": "particle_wo",
+      "en": "を marks the direct object of a transitive verb.",
+      "examples": ["ご飯を食べます。 (I eat rice.)", "水を飲みます。 (I drink water.)"],
+      "hindi_contrast": "Roughly को on a definite object, but Japanese を is required on any direct object, definite or not.",
+      "interference_warning": false,
+      "source": "Tae Kim §3.1.3"
+    },
+    {
+      "id": "particle_ni_de",
+      "en": "に marks a destination, a point in time, or where something exists. で marks where an action happens, or the means used.",
+      "examples": ["駅に行きます。 (I go to the station.)", "駅で待ちます。 (I wait at the station.)", "電車で行きます。 (I go by train.)"],
+      "hindi_contrast": "Both often surface as में/पर in Hindi, which is exactly why the に/で split is hard — Hindi does not force the existence-vs-action distinction.",
+      "interference_warning": true,
+      "source": "Tae Kim §3.3; DoJG p.297"
+    },
+    {
+      "id": "transitive_intransitive",
+      "en": "Japanese pairs verbs: a transitive one (something does it, takes を) and an intransitive one (it happens, takes が). They are different words, not a voice change.",
+      "examples": ["ドアを開けます。 (I open the door.) — transitive 開ける", "ドアが開きます。 (The door opens.) — intransitive 開く"],
+      "hindi_contrast": "Hindi has the same pattern — खोलना vs खुलना. This one transfers well; trust the instinct.",
+      "interference_warning": false,
+      "source": "Tae Kim §5.5; DoJG p.585"
+    },
+    {
+      "id": "te_form",
+      "en": "The て-form links clauses ('and then'), requests with ください, and forms the progressive with いる. It carries no tense of its own — the final verb sets the tense.",
+      "examples": ["起きて、食べます。 (I get up and eat.)", "待ってください。 (Please wait.)", "食べています。 (I am eating.)"],
+      "hindi_contrast": "Close to the कर conjunctive: 'उठकर खाता हूँ'. The tenseless-linker behaviour matches well.",
+      "interference_warning": false,
+      "source": "Tae Kim §4.3"
+    },
+    {
+      "id": "politeness_register",
+      "en": "です/ます is the polite register; plain form (だ, 食べる) is casual. Pick one per conversation. Plain form is still required inside subordinate clauses even when speaking politely.",
+      "examples": ["食べます。 (polite)", "食べる。 (plain)", "食べる時、水を飲みます。 (plain inside the clause, polite at the end — correct)"],
+      "hindi_contrast": "Comparable to आप/तुम/तू levels, but Japanese marks it on the VERB rather than the pronoun, and dropping the pronoun does not drop the register.",
+      "interference_warning": true,
+      "source": "Tae Kim §2.2, §4.1"
+    },
+    {
+      "id": "counters",
+      "en": "Counting requires a counter matched to the thing counted. 一つ/二つ is the general one for objects; 人 for people, 枚 for flat things, 本 for long things.",
+      "examples": ["コーヒーを一つください。 (One coffee, please.)", "二人です。 (Two people.)"],
+      "hindi_contrast": "Hindi counts bare — 'दो लोग'. Japanese never does; a bare number before a noun is ungrammatical.",
+      "interference_warning": true,
+      "source": "Tae Kim §3.7; DoJG p.44"
+    },
+    {
+      "id": "adjective_types",
+      "en": "い-adjectives conjugate themselves (高い → 高くない). な-adjectives take な before a noun and conjugate with です/じゃない (好き → 好きじゃない).",
+      "examples": ["高い店 (an expensive shop)", "好きな店 (a shop I like)", "高くないです。 (It isn't expensive.)"],
+      "interference_warning": false,
+      "source": "Tae Kim §4.2"
+    },
+    {
+      "id": "question_ka",
+      "en": "か at the end makes a question. Word order does not change, and no rising intonation is required in polite speech.",
+      "examples": ["行きます。 (I go.)", "行きますか。 (Do you go?)"],
+      "hindi_contrast": "Like क्या, but placed at the END rather than the start.",
+      "interference_warning": false,
+      "source": "Tae Kim §3.6"
+    },
+    {
+      "id": "negation_polite",
+      "en": "ます becomes ません for polite negation. です becomes じゃないです or ではありません.",
+      "examples": ["食べます → 食べません", "学生です → 学生じゃないです"],
+      "interference_warning": false,
+      "source": "Tae Kim §4.1"
+    },
+    {
+      "id": "past_polite",
+      "en": "ます becomes ました for polite past. です becomes でした.",
+      "examples": ["食べます → 食べました", "高いです → 高かったです (note: the ADJECTIVE takes the past, not です)"],
+      "interference_warning": true,
+      "source": "Tae Kim §4.1"
+    },
+    {
+      "id": "particle_no",
+      "en": "の links nouns, most often showing possession or attribute. The modifier comes first.",
+      "examples": ["私の本 (my book)", "日本語の先生 (a Japanese-language teacher)"],
+      "hindi_contrast": "Like का/की/के but INVARIANT — の never agrees with gender or number.",
+      "interference_warning": true,
+      "source": "Tae Kim §3.2"
+    },
+    {
+      "id": "existence_aru_iru",
+      "en": "ある for inanimate things, いる for animate ones. The distinction is grammatical, not optional.",
+      "examples": ["店があります。 (There is a shop.)", "友達がいます。 (I have a friend / a friend is there.)"],
+      "hindi_contrast": "Hindi uses है for both. There is no Hindi cue for this split.",
+      "interference_warning": true,
+      "source": "Tae Kim §3.4"
+    },
+    {
+      "id": "word_order_sov",
+      "en": "Japanese is subject–object–verb, and the verb must come last. Other elements move freely because particles, not position, mark their roles.",
+      "examples": ["私はご飯を食べます。 (I rice eat.)"],
+      "hindi_contrast": "Identical to Hindi SOV — 'मैं खाना खाता हूँ'. This is the single largest free transfer available.",
+      "interference_warning": false,
+      "source": "Tae Kim §2.1"
+    },
+    {
+      "id": "pro_drop",
+      "en": "Subjects and objects are dropped whenever context supplies them. Repeating 私は sounds unnatural.",
+      "examples": ["食べましたか。 (Did [you] eat?)", "はい、食べました。 (Yes, [I] ate.)"],
+      "hindi_contrast": "Hindi drops pronouns too, but its verb still agrees for person and gender. Japanese verbs carry NO agreement, so the only recovery is context.",
+      "interference_warning": true,
+      "source": "Tae Kim §2.1"
+    },
+    {
+      "id": "kudasai_requests",
+      "en": "Noun + をください asks for a thing. て-form + ください asks for an action.",
+      "examples": ["水をください。 (Water, please.)", "待ってください。 (Please wait.)"],
+      "interference_warning": false,
+      "source": "Tae Kim §4.3.2"
+    },
+    {
+      "id": "permission_temoii",
+      "en": "て-form + もいいですか asks permission.",
+      "examples": ["写真を撮ってもいいですか。 (May I take a photo?)"],
+      "interference_warning": false,
+      "source": "Tae Kim §5.1"
+    },
+    {
+      "id": "particle_to_ya",
+      "en": "と joins nouns exhaustively ('and', a complete list). や implies the list is partial.",
+      "examples": ["肉と魚 (meat and fish — just those)", "肉や魚 (meat, fish, and so on)"],
+      "hindi_contrast": "と is और for a closed list. Hindi has no common equivalent of や's 'and such'.",
+      "interference_warning": false,
+      "source": "Tae Kim §3.1.5"
+    },
+    {
+      "id": "pitch_accent_basics",
+      "en": "Japanese distinguishes words by PITCH pattern across morae, not by stress. 箸 (chopsticks, HL) and 橋 (bridge, LH) differ only in pitch.",
+      "examples": ["はし HL = chopsticks", "はし LH = bridge"],
+      "hindi_contrast": "Hindi uses weight-based STRESS — a heavy syllable is said louder and longer. Applying that to Japanese produces the single most persistent foreign-accent marker. Pitch is a melody, not emphasis.",
+      "interference_warning": true,
+      "source": "PRD FR-6; NHK 日本語発音アクセント辞典"
+    }
+  ]
+}
+

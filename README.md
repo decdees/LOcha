@@ -13,7 +13,7 @@ You speak Japanese into an iPhone. The Mac listens, thinks, and answers out loud
 Three things, in order of how much they matter:
 
 1. **Grammar explanations are never generated.** When the model detects a grammar question it is not allowed to answer — it emits a sentinel and its own text is discarded. The explanation comes from a hand-authored reference file. An LLM that is confidently wrong about は vs が is worse than no tutor at all, and this is the one part of the system with a test that must never be weakened.
-2. **The vocabulary is earned, not offered.** The tutor may only use words you have already practised, plus at most one new word per turn, glossed. The word list comes from FSRS scheduling, so the conversation is a drill disguised as a chat.
+2. **The vocabulary is steered, not falsely guaranteed.** FSRS selects words for the prompt and the tutor is instructed to stay within the known pool plus at most one glossed new word. A small model can still disobey. Free-conversation mentions are stored as observations only; they never become FSRS ratings.
 3. **Pitch accent is measured, not vibed.** Japanese meaning rides on a high/low pattern across morae — 箸 (chopsticks) and 橋 (bridge) differ only in pitch. The long-term goal is to score that deterministically and feed the score back into scheduling. This is deferred until after October 2026; see [PRD.md](PRD.md) §10 for the trade.
 
 The learner's L1 is Hindi, which the design treats as information rather than trivia: Hindi and Japanese genuinely share SOV order, postpositions and pro-drop, but Hindi's ergative ने is *not* Japanese が, and Hindi's weight-based stress actively interferes with Japanese pitch. Reference entries carry an `interference_warning` flag for exactly these.
@@ -24,19 +24,19 @@ The learner's L1 is Hindi, which the design treats as information rather than tr
 
 ```mermaid
 flowchart LR
-    subgraph phone["iPhone — native SwiftUI app"]
-        MIC["AVAudioEngine<br/>mic tap"]
-        SPK["AVAudioPlayerNode<br/>playback"]
+    subgraph phone["iPhone — installed PWA"]
+        MIC["getUserMedia<br/>AudioWorklet"]
+        SPK["Web Audio<br/>scheduled playback"]
     end
 
     subgraph mac["MacBook Pro M4 · 32 GB · everything local"]
         direction TB
         VAD["silero-vad<br/>endpointing"]
         ASR["whisper-large-v3<br/>MLX · 1.25 s"]
-        CTX["Context Builder<br/>FSRS due items + history"]
-        LLM["Qwen3.5-9B 4-bit<br/>MLX · TTFT 0.5 s"]
+        CTX["Context Builder<br/>FSRS steering + explicit history"]
+        LLM["Qwen3.5-9B 4-bit<br/>MLX · full quarantine"]
         FW{"grammar<br/>query?"}
-        REF[("data/grammar.json<br/>curated reference")]
+        REF[("package grammar.json<br/>curated reference")]
         CHUNK["sentence chunker<br/>splits on 。！？"]
         TTS["VOICEVOX<br/>speaker 13"]
     end
@@ -70,13 +70,13 @@ sequenceDiagram
     end
 ```
 
-The model's explanation is not filtered, ranked, or fact-checked — it is structurally unable to reach the user, because the object returned on this path has nowhere to put it. On a reference miss the honest answer is given instead of a generated one.
+The complete model reply stays quarantined until the firewall returns. If the contiguous `GRAMMAR_QUERY` token occurs anywhere—beginning, middle, end, dirty text, or damaged brackets—no model text or model-derived audio is emitted. This does not claim to detect marker-free grammar explanations.
 
 ---
 
 ### What the user is told while all that happens
 
-A real turn takes ~2.5 s. That is fine, and a silent 2.5 s is not — a silent gap reads as a crash, the same gap with a live transcript reads as listening. So every stage boundary maps to a state the client can actually render, and there is deliberately no `processing` catch-all: a state nobody can see does not count as feedback.
+Latency and feedback are currently **unproven**. The earlier 2.05 s result mixed exchanges and admitted negative measurements. The v2 protocol attributes every JSON event and audio chunk to one UUID and records scheduled playback on the client clock; only a complete 50-turn iPhone run may establish G1a/G1b.
 
 ```mermaid
 stateDiagram-v2
@@ -94,13 +94,13 @@ stateDiagram-v2
 
 ---
 
-## Status — July 2026
+## Status — August 2026
 
 | Phase | What it delivers | State |
 | --- | --- | --- |
 | **0** | Measurements: hardware bandwidth, ASR bake-off, LLM latency, co-resident contention | ✅ `benchmarks/` |
-| **1** | Context Builder, FSRS rating derivation, grammar firewall, `POST /turn` | ✅ 159 tests |
-| **2** | WebSocket transport, VAD, ASR, TTS, native iOS client | 🔨 in progress |
+| **1** | Context Builder, observations, grammar firewall, `POST /turn` | ✅ implemented |
+| **2** | WebSocket transport, VAD, ASR repair, TTS, iPhone PWA | 🔨 measurement pending |
 | **3** | Alignment-free GOP + comparative pitch scoring | ⏸ deliberately post-October |
 
 **Phase 0 was not ceremony.** It falsified most of the original architecture:
@@ -117,6 +117,8 @@ The lesson from the second point is now a standing rule: **measure components co
 
 ```bash
 uv sync
+uv run hf download mlx-community/Qwen3.5-9B-4bit
+uv run hf download mlx-community/whisper-large-v3-mlx
 make dev          # POST /turn on :8000, WebSocket voice loop on /ws
 make check        # ruff + mypy --strict + pytest
 make test-slow    # loads the real 5 GB model; needs VOICEVOX on :50021
@@ -124,7 +126,7 @@ make test-slow    # loads the real 5 GB model; needs VOICEVOX on :50021
 
 VOICEVOX Engine runs separately (CPU, port 50021) and is the only non-Python service. **Speaker 13 (青山龍星)** is pinned as a dependency, not a preference: TTS output is the reference recording for pitch scoring, and an octave gap between reference and learner degrades alignment even after normalisation.
 
-The iOS client is sideloaded with a free Apple Developer account, which means the provisioning profile **expires every 7 days** and the app is re-deployed from Xcode weekly. That is an accepted operating cost of the $0/month constraint, not an oversight.
+Model downloads are explicit setup actions. Runtime resolves both model repositories with `local_files_only=True` and fails with an actionable error if either is absent; it never downloads or falls back to cloud inference.
 
 ---
 
@@ -135,14 +137,14 @@ PRD.md            requirements, gates, the deliberate trades
 ARCHITECTURE.md   component rationale — including what it got wrong and why
 TASKS.md          the work queue
 benchmarks/       Phase 0 output: reports, not throwaway scripts
-data/grammar.json the curated reference the firewall serves from
+src/ocha/resources/grammar.json tracked package data served by the firewall
 src/ocha/
   api/            FastAPI routes, /turn and /ws
   tutor/          context builder, firewall, LLM service
   speech/         wire format, pipeline, instrumentation
-  scheduling/     py-fsrs wrapper, rating derivation
+  scheduling/     py-fsrs wrapper; ratings reserved for validated drills
   db/             schema, migrations
-tests/            159 tests; the firewall ones are not negotiable
+tests/            correctness, transport, measurement, and firewall tests
 ```
 
 Design documents are kept honest rather than tidy: where a measurement contradicted a decision, the original reasoning is struck through and left in place with the number that killed it. `ARCHITECTURE.md` §3.0 is titled *"What this section got wrong."*
@@ -151,4 +153,4 @@ Design documents are kept honest rather than tidy: where a measurement contradic
 
 ## Stack
 
-Python 3.12 · `uv` · FastAPI · SQLite (WAL) · MLX · Pipecat 1.6 · `py-fsrs` · `fugashi`/`unidic-lite` · SwiftUI client · `ruff` + `mypy --strict` + `pytest`
+Python 3.12 · `uv` · FastAPI · SQLite (WAL) · MLX · Pipecat 1.6 · `py-fsrs` · `fugashi`/`unidic-lite` · installable PWA · `ruff` + `mypy --strict` + `pytest`

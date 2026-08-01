@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "fsrs>=6.3.1",
     "fugashi>=1.5.2",
+    "huggingface-hub>=0.26",
     "mlx>=0.32.0",
     "mlx-lm>=0.31.3",
     # websocket, not webrtc: the client is native and hands us PCM directly, and
@@ -24,7 +25,6 @@ dependencies = [
 bench = [
   "mlx-whisper>=0.4",
   "jiwer>=3.0",
-  "huggingface-hub>=0.26",
   "parakeet-mlx>=0.5.2",
 ]
 dev = [
@@ -41,6 +41,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ocha"]
+include = ["src/ocha/resources/grammar.json"]
 
 [tool.ruff]
 line-length = 100

@@ -11,14 +11,13 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-from ocha.scheduling.rating import Usage, derive_rating
 from ocha.scheduling.scheduler import Item, ItemScheduler
 from ocha.turnstate import TurnState, TurnTimeline
-from ocha.tutor.context import MAX_REPLY_TOKENS, build_context
+from ocha.tutor.context import MAX_REPLY_TOKENS, TurnContext, build_context
 from ocha.tutor.firewall import GrammarResponse, apply_firewall
 from ocha.tutor.grammar import GrammarReference
-from ocha.tutor.llm import LlmService
-from ocha.tutor.usage import detect_usage
+from ocha.tutor.llm import ChatMessage, LlmService
+from ocha.tutor.observation import Evidence, observe_targets
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +27,9 @@ class TurnResult:
     reply: str | None
     grammar: GrammarResponse | None
     targets: tuple[str, ...]
+    observations: dict[int, Evidence]
+    # Compatibility fields. Free conversation is not a validated drill and does
+    # not produce FSRS ratings.
     ratings: dict[int, int]
     usage: dict[int, str]
     # T2.8: what the user was told was happening, and when. Recorded from Phase 1
@@ -58,6 +60,26 @@ def _last_tutor_text(conn: sqlite3.Connection, session_id: int) -> str | None:
     return None if row is None else str(row["tutor_text"])
 
 
+def conversation_history(
+    conn: sqlite3.Connection, session_id: int, *, exchanges: int = 4
+) -> tuple[ChatMessage, ...]:
+    """Return explicit, complete non-grammar exchanges, oldest first."""
+    rows = conn.execute(
+        "SELECT user_text, tutor_text FROM turns "
+        "WHERE session_id = ? AND grammar_query = 0 AND tutor_text <> '' "
+        "ORDER BY id DESC LIMIT ?",
+        (session_id, exchanges),
+    ).fetchall()
+    return tuple(
+        message
+        for row in reversed(rows)
+        for message in (
+            ChatMessage(role="user", content=str(row["user_text"])),
+            ChatMessage(role="assistant", content=str(row["tutor_text"])),
+        )
+    )
+
+
 def run_turn(
     conn: sqlite3.Connection,
     scheduler: ItemScheduler,
@@ -69,31 +91,51 @@ def run_turn(
     timeline: TurnTimeline | None = None,
     raw: str | None = None,
 ) -> TurnResult:
-    """One turn: context, generation, firewall, scoring, persistence.
-
-    `raw` exists for the voice loop (T2.4). There, the reply has already been
-    generated -- streamed sentence by sentence so synthesis can start on the first
-    one -- and generating again here would double the latency and produce a
-    *different* reply from the one the user heard. Passing it in reuses the
-    firewall, scoring and persistence rather than reimplementing all three
-    alongside the pipeline.
-
-    It buys no way around the firewall: `apply_firewall` runs on `raw` exactly as
-    it runs on a locally generated reply, and the pipeline withholds every token
-    from the client until this call returns.
-    """
+    """Build context, generate a complete reply, then finalize it once."""
     tl = timeline if timeline is not None else TurnTimeline()
-
     session = ensure_session(conn, session_id)
-    previous = _last_tutor_text(conn, session)
-
-    # Phase 1 has no microphone, so the turn starts already transcribed. The
-    # LISTENING and TRANSCRIBING states are emitted by the voice pipeline in
-    # T2.2/T2.3; from here the states are the same.
     tl.emit(TurnState.THINKING, "building context")
     ctx = build_context(scheduler)
     if raw is None:
-        raw = llm.generate(ctx.system_prompt, user_text, max_tokens=MAX_REPLY_TOKENS)
+        raw = llm.generate(
+            ctx.system_prompt,
+            user_text,
+            history=conversation_history(conn, session),
+            max_tokens=MAX_REPLY_TOKENS,
+        )
+    return finalize_turn(
+        conn,
+        scheduler,
+        reference,
+        user_text,
+        context=ctx,
+        raw=raw,
+        session_id=session,
+        timeline=tl,
+    )
+
+
+def finalize_turn(
+    conn: sqlite3.Connection,
+    scheduler: ItemScheduler,
+    reference: GrammarReference,
+    user_text: str,
+    *,
+    context: TurnContext,
+    raw: str,
+    session_id: int | None = None,
+    timeline: TurnTimeline | None = None,
+) -> TurnResult:
+    """Firewall one complete generation, then score and persist its safe result.
+
+    This is the sole boundary between model output and user-visible output. Callers
+    may collect generation differently, but must not emit any part of ``raw``
+    before this function returns.
+    """
+    tl = timeline if timeline is not None else TurnTimeline()
+    session = ensure_session(conn, session_id)
+    previous = _last_tutor_text(conn, session)
+
     outcome = apply_firewall(raw, user_text, reference, conn)
     tl.emit(
         TurnState.GRAMMAR if outcome.fired else TurnState.SPEAKING,
@@ -101,30 +143,18 @@ def run_turn(
     )
 
     target_items: list[Item] = [
-        i for i in scheduler.due_items(limit=20) if i.id in set(ctx.target_ids)
+        i for i in scheduler.due_items(limit=20) if i.id in set(context.target_ids)
     ]
     # due_items cannot see targets that came from lowest_stability, so top up.
     have = {i.id for i in target_items}
     for weak in scheduler.lowest_stability(limit=10):
-        if weak.id in ctx.target_ids and weak.id not in have:
+        if weak.id in context.target_ids and weak.id not in have:
             target_items.append(weak)
             have.add(weak.id)
 
-    ratings: dict[int, int] = {}
-    usage: dict[int, str] = {}
-
-    # A grammar question is not a production attempt. Scoring it would punish the
-    # learner for asking, which is the opposite of what the firewall is for.
+    observations: dict[int, Evidence] = {}
     if not outcome.fired:
-        report = detect_usage(target_items, user_text, previous)
-        by_id = {i.id: i for i in target_items}
-        for item_id, how in report.usage.items():
-            item = by_id[item_id]
-            was_due = item.id in set(i.id for i in scheduler.due_items(limit=20))
-            rating = derive_rating(Usage(how), was_due=was_due)
-            scheduler.record_review(item_id, rating, source=f"turn:session{session}")
-            ratings[item_id] = int(rating.value)
-            usage[item_id] = how.value
+        observations = observe_targets(target_items, user_text, previous).observations
 
     tutor_text = outcome.reply if outcome.reply is not None else ""
     cur = conn.execute(
@@ -134,20 +164,26 @@ def run_turn(
             session,
             user_text,
             tutor_text,
-            json.dumps(list(ctx.target_ids)),
-            json.dumps(ratings),
+            json.dumps(list(context.target_ids)),
+            "{}",
             int(outcome.fired),
         ),
+    )
+    turn_id = int(cur.lastrowid or 0)
+    conn.executemany(
+        "INSERT INTO item_observations (turn_id, item_id, evidence) VALUES (?, ?, ?)",
+        ((turn_id, item_id, evidence) for item_id, evidence in observations.items()),
     )
 
     tl.finish()
     return TurnResult(
         session_id=session,
-        turn_id=int(cur.lastrowid or 0),
+        turn_id=turn_id,
         reply=outcome.reply,
         grammar=outcome.grammar,
-        targets=ctx.target_contents,
-        ratings=ratings,
-        usage=usage,
+        targets=context.target_contents,
+        observations=observations,
+        ratings={},
+        usage={},
         timeline=tl,
     )
