@@ -210,6 +210,13 @@ def test_pwa_defaults_to_guided_and_never_selects_remote_english_voice() -> None
     assert "/ws?mode=${currentMode}" in client
 
 
+def test_pwa_uses_safari_capture_fallback_before_starting_lesson() -> None:
+    client = (Path(__file__).parents[1] / "web" / "index.html").read_text()
+    assert "audioCtx.createScriptProcessor(4096, 1, 1)" in client
+    assert "node.connect(muteNode).connect(audioCtx.destination)" in client
+    assert client.index("new AudioWorkletNode") < client.index("ws = new WebSocket")
+
+
 async def test_setup_rejects_a_rate_mismatch(ser: OchaSerializer) -> None:
     """A resample would be inaudible here and show up as an ASR accuracy bug."""
     with pytest.raises(ValueError, match="16000"):

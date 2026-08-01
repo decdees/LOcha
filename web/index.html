@@ -109,7 +109,8 @@ const voiceStatus = document.getElementById('voice-status');
 const modeButtons = [...document.querySelectorAll('#mode button')];
 
 const HEADER_BYTES = 26;      // OCH1 + version + kind + u32 seq + UUID
-let ws, audioCtx, node, stream, playAt = 0, interimEl = null, tutorEl = null;
+let ws, audioCtx, node, captureSource, muteNode, stream, playAt = 0;
+let interimEl = null, tutorEl = null;
 let lessonEl = null, guidedAudioBatch = [], mediaQueue = [], mediaBusy = false;
 let pendingGuidedInstruction = '', recording = false, processing = false;
 let currentMode = localStorage.getItem('ocha.mode');
@@ -523,6 +524,7 @@ async function start() {
   try {
     await connect();
   } catch (err) {
+    stop();
     // A denied microphone is the most likely first-run failure, and leaving the
     // button dead with no explanation is the worst way to report it.
     const el = turn('grammar', 'cannot start');
@@ -549,9 +551,41 @@ async function connect() {
 
   audioCtx = new AudioContext();
   await audioCtx.resume();
-  await audioCtx.audioWorklet.addModule(
-    URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' })));
+  captureSource = audioCtx.createMediaStreamSource(stream);
+  try {
+    const workletUrl = URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' }));
+    try {
+      await audioCtx.audioWorklet.addModule(workletUrl);
+      node = new AudioWorkletNode(audioCtx, 'capture');
+    } finally {
+      URL.revokeObjectURL(workletUrl);
+    }
+    node.port.onmessage = e => sendCaptured(e.data);
+    captureSource.connect(node);
+  } catch (err) {
+    console.warn('AudioWorklet capture unavailable; using Safari fallback.', err);
+    let carry = 0;
+    node = audioCtx.createScriptProcessor(4096, 1, 1);
+    node.onaudioprocess = event => {
+      const ch = event.inputBuffer.getChannelData(0);
+      const ratio = audioCtx.sampleRate / RATE;
+      const out = new Int16Array(Math.floor((ch.length - carry) / ratio) + 1);
+      let n = 0;
+      for (let i = carry; i < ch.length; i += ratio) {
+        const sample = Math.max(-1, Math.min(1, ch[Math.floor(i)]));
+        out[n++] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      }
+      carry = (carry + n * ratio) - ch.length;
+      if (n) sendCaptured(out.slice(0, n).buffer);
+    };
+    muteNode = audioCtx.createGain();
+    muteNode.gain.value = 0;
+    captureSource.connect(node);
+    node.connect(muteNode).connect(audioCtx.destination);
+  }
 
+  // Do not start a server lesson until microphone capture is usable. Otherwise
+  // a Safari capture failure leaves an orphaned lesson playing indefinitely.
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?mode=${currentMode}`);
   ws.binaryType = 'arraybuffer';
   ws.onmessage = onMessage;
@@ -562,18 +596,14 @@ async function connect() {
   };
   await new Promise(r => ws.onopen = r);
 
-  node = new AudioWorkletNode(audioCtx, 'capture');
-  node.port.onmessage = e => {
-    const appIsSpeaking = mediaBusy || audioCtx.currentTime < playAt;
-    if (ws.readyState === 1 && recording && !appIsSpeaking) ws.send(e.data);
-  };
-  audioCtx.createMediaStreamSource(stream).connect(node);
-  // Not connected to destination: the worklet produces no output, and routing the
-  // microphone to the speakers is a feedback loop.
-
   recording = processing = false;
   micBtn.onclick = startRecording;
   setState('idle');
+}
+
+function sendCaptured(buffer) {
+  const appIsSpeaking = mediaBusy || audioCtx.currentTime < playAt;
+  if (ws?.readyState === WebSocket.OPEN && recording && !appIsSpeaking) ws.send(buffer);
 }
 
 function startRecording() {
@@ -597,10 +627,13 @@ function stopRecording(sendTrailingSilence) {
 }
 
 function stop() {
+  node?.disconnect();
+  captureSource?.disconnect();
+  muteNode?.disconnect();
   ws?.close();
   stream?.getTracks().forEach(t => t.stop());
   audioCtx?.close();
-  audioCtx = null;
+  ws = audioCtx = node = captureSource = muteNode = stream = null;
   playAt = 0;
   scheduled.clear();
   guidedAudioBatch = [];
