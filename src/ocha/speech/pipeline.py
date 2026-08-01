@@ -22,6 +22,7 @@ without ASR in the way. `/ws?loopback=1` selects it.
 from __future__ import annotations
 
 import sqlite3
+from typing import Literal
 
 from fastapi import WebSocket
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -47,6 +48,7 @@ from ocha.speech.attribution import (
     OutputAttributionProcessor,
 )
 from ocha.speech.filler import FillerBank, FillerProcessor, FillerState
+from ocha.speech.guided_stage import GuidedLessonStage
 from ocha.speech.probe import Spans, TurnStateProbe
 from ocha.speech.repair import AsrRepairProcessor
 from ocha.speech.tts import VoicevoxTTS
@@ -148,6 +150,7 @@ def build_pipeline(
     fillers: FillerBank | None = None,
     repair_audio: bytes | None = None,
     attribution: AttributionState | None = None,
+    mode: Literal["guided", "conversation"] = "conversation",
 ) -> tuple[Pipeline, TurnStateProbe]:
     """The real loop. `asr`/`tts` are injectable so tests can run it without MLX.
 
@@ -186,8 +189,18 @@ def build_pipeline(
     # NOTE the construction order -- the emitter registers itself on the state, so it
     # must exist before the trigger can fire through it.
     filler_state = FillerState()
-    emit = [FillerProcessor(fillers, filler_state, emit=True)] if fillers else []
-    trigger = [FillerProcessor(fillers, filler_state)] if fillers else []
+    use_fillers = fillers is not None and mode == "conversation"
+    emit: list[FrameProcessor] = []
+    trigger: list[FrameProcessor] = []
+    if use_fillers:
+        assert fillers is not None
+        emit.append(FillerProcessor(fillers, filler_state, emit=True))
+        trigger.append(FillerProcessor(fillers, filler_state))
+    tutor: FrameProcessor = (
+        GuidedLessonStage(conn)
+        if mode == "guided"
+        else TutorStage(conn, scheduler, reference, llm)
+    )
 
     return (
         Pipeline(
@@ -201,7 +214,7 @@ def build_pipeline(
                 asr if asr is not None else OchaWhisper(),
                 after_asr,
                 AsrRepairProcessor(repair_audio, SAMPLE_RATE),
-                TutorStage(conn, scheduler, reference, llm),
+                tutor,
                 after_tutor,
                 tts if tts is not None else VoicevoxTTS(),
                 *emit,
@@ -227,6 +240,7 @@ async def run_session(
     tts: FrameProcessor | None = None,
     fillers: FillerBank | None = None,
     repair_audio: bytes | None = None,
+    mode: Literal["guided", "conversation"] = "conversation",
 ) -> TurnStateProbe:
     """Serve one client connection for its whole life. Returns the probe.
 
@@ -249,6 +263,7 @@ async def run_session(
             fillers=fillers,
             repair_audio=repair_audio,
             attribution=attribution,
+            mode=mode,
         )
     # PipelineWorker/WorkerRunner, not PipelineTask/PipelineRunner: the latter pair
     # is deprecated as of Pipecat 1.3 and removed at 2.0. Same objects, new names.

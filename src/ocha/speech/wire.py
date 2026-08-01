@@ -32,8 +32,9 @@ from __future__ import annotations
 import json
 import struct
 import uuid
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pipecat.frames.frames import (
     Frame,
@@ -69,6 +70,13 @@ class AudioKind(IntEnum):
     FILLER = 1
     TUTOR = 2
     REPAIR = 3
+
+
+@dataclass
+class LessonActionFrame(Frame):
+    action: Literal["replay", "reveal", "skip"]
+    lesson_id: str
+    step_id: str
 
 
 def pack_audio(exchange_id: uuid.UUID, sequence: int, kind: AudioKind, pcm: bytes) -> bytes:
@@ -146,6 +154,15 @@ class OchaSerializer(FrameSerializer):
             return InputAudioRawFrame(audio=data, sample_rate=SAMPLE_RATE, num_channels=CHANNELS)
         try:
             message = json.loads(data)
+            if message.get("type") == "lesson_action":
+                action = str(message["action"])
+                if action not in {"replay", "reveal", "skip"}:
+                    return None
+                return LessonActionFrame(
+                    action=action,  # type: ignore[arg-type]
+                    lesson_id=str(message["lesson_id"]),
+                    step_id=str(message["step_id"]),
+                )
             if message.get("type") != "client_metric":
                 return None
             from ocha.speech.attribution import ClientMetricFrame

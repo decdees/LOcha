@@ -16,6 +16,7 @@ import pathlib
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.staticfiles import StaticFiles
@@ -173,7 +174,11 @@ async def turn(req: TurnRequest) -> TurnResponse:
 
 
 @app.websocket("/ws")
-async def ws(websocket: WebSocket, loopback: bool = False) -> None:
+async def ws(
+    websocket: WebSocket,
+    loopback: bool = False,
+    mode: Literal["guided", "conversation"] = "guided",
+) -> None:
     """The voice loop (T2.1-T2.5). One client, one connection, its whole life.
 
     `async def` for the same reason /turn is: the pipeline runs MLX inference
@@ -207,6 +212,7 @@ async def ws(websocket: WebSocket, loopback: bool = False) -> None:
         tts=getattr(app.state, "tts", None),
         fillers=getattr(app.state, "fillers", None),
         repair_audio=getattr(app.state, "repair_audio", None),
+        mode=mode,
     )
     logging.getLogger(__name__).info("ws session ended: %s", probe.report())
 

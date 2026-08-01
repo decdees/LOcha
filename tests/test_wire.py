@@ -32,6 +32,7 @@ from ocha.speech.wire import (
     SAMPLE_RATE,
     AudioKind,
     ClientText,
+    LessonActionFrame,
     OchaSerializer,
     _client_message,
     state_message,
@@ -168,6 +169,24 @@ async def test_client_playback_metric_is_typed(ser: OchaSerializer) -> None:
     assert isinstance(frame, ClientMetricFrame)
     assert frame.exchange_id == exchange_id
     assert frame.duration_ms == 320.0
+
+
+async def test_lesson_action_is_typed_and_bounded(ser: OchaSerializer) -> None:
+    frame = await ser.deserialize(
+        json.dumps(
+            {
+                "type": "lesson_action",
+                "action": "replay",
+                "lesson_id": "greetings",
+                "step_id": "greeting-hello",
+            }
+        )
+    )
+    assert isinstance(frame, LessonActionFrame)
+    assert frame.action == "replay"
+    assert await ser.deserialize(
+        '{"type":"lesson_action","action":"delete","lesson_id":"x","step_id":"y"}'
+    ) is None
 
 
 def test_pwa_buffers_playback_by_150ms() -> None:
