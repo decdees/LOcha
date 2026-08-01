@@ -79,6 +79,10 @@ def test_warm_uses_a_resolved_local_model_path(
     assert seen == [tmp_path]
 
 
+def test_conversation_can_enable_local_language_detection() -> None:
+    assert OchaWhisper(decode_language=None)._decode_language is None
+
+
 def test_short_text_is_never_a_loop() -> None:
     """「はいはい」 is a word. Below the length floor nothing is judged at all."""
     assert not is_looping("はいはい")

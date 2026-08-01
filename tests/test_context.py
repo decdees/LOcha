@@ -53,6 +53,7 @@ def test_cold_start_still_carries_the_required_lines(sched: ItemScheduler) -> No
     assert "REGISTER: Always use polite です/ます form." in p  # T0.5: load-bearing
     assert SENTINEL in p  # the firewall cannot fire if the model is never told
     assert "1-2 short sentences" in p  # FR-3
+    assert "learner may speak English" in p
 
 
 # ---- state 2: some items known -------------------------------------------

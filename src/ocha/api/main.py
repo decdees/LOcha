@@ -193,13 +193,20 @@ async def ws(
 
     asr = None
     if not loopback:
-        from ocha.speech.asr import OchaWhisper
+        from ocha.speech.asr import LANGUAGE, OchaWhisper
 
         # SegmentedSTTService owns per-connection buffers and Pipecat lifecycle
         # state, so it must never be relinked into a second pipeline. The MLX
         # model remains warm in mlx_whisper's process cache and every inference
         # call still runs on the one worker that loaded it.
-        asr = OchaWhisper(sample_rate=SAMPLE_RATE, worker=app.state.worker)
+        asr = OchaWhisper(
+            sample_rate=SAMPLE_RATE,
+            worker=app.state.worker,
+            # Guided targets are curated Japanese and must be decoded as such.
+            # Conversation accepts beginner questions in English as well as
+            # Japanese, so Whisper performs local language detection there.
+            decode_language=LANGUAGE if mode == "guided" else None,
+        )
 
     probe = await run_session(
         websocket,

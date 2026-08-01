@@ -136,7 +136,12 @@ class OchaWhisper(SegmentedSTTService):
     """Transcribes one VAD-delimited segment at a time."""
 
     def __init__(
-        self, *, model: str = MODEL, worker: InferenceWorker | None = None, **kwargs: object
+        self,
+        *,
+        model: str = MODEL,
+        worker: InferenceWorker | None = None,
+        decode_language: Language | None = LANGUAGE,
+        **kwargs: object,
     ) -> None:
         # Settings are declared rather than left NOT_GIVEN: Pipecat logs an ERROR
         # for each unset field, and an error-level line that is always there trains
@@ -144,6 +149,7 @@ class OchaWhisper(SegmentedSTTService):
         super().__init__(settings=STTSettings(model=model, language=LANGUAGE), **kwargs)  # type: ignore[arg-type]
         self._model = model
         self._model_path: Path | None = None
+        self._decode_language = decode_language
         # None only in tests that never load MLX. In the app it is always set, and
         # `_transcribe` running inline is a thread-affinity bug waiting to happen.
         self._worker = worker
@@ -203,7 +209,7 @@ class OchaWhisper(SegmentedSTTService):
             result = mlx_whisper.transcribe(
                 samples.astype(np.float32) / 32768.0,
                 path_or_hf_repo=self._model_path,
-                language=LANGUAGE,
+                language=self._decode_language,
                 condition_on_previous_text=CONDITION_ON_PREVIOUS_TEXT,
             )
             return str(result["text"]).strip()

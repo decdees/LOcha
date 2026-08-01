@@ -6,6 +6,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.tests.utils import run_test
@@ -39,6 +40,7 @@ async def test_initial_guided_target_is_spoken_in_japanese(tmp_path: Path) -> No
     down, _ = await run_test(Pipeline([GuidedLessonStage(conn), tts]), frames_to_send=[])
     assert tts.spoken == ["こんにちは"]
     assert any(isinstance(frame, TTSAudioRawFrame) for frame in down)
+    assert any(isinstance(frame, TTSStoppedFrame) for frame in down)
 
 
 async def test_guided_step_requires_repeat_then_hidden_recall(tmp_path: Path) -> None:

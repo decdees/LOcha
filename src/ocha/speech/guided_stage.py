@@ -7,6 +7,7 @@ from typing import Literal
 
 from pipecat.frames.frames import (
     Frame,
+    LLMFullResponseEndFrame,
     OutputTransportMessageUrgentFrame,
     StartFrame,
     TextFrame,
@@ -105,20 +106,27 @@ class GuidedLessonStage(FrameProcessor):
         self._phase = "repeat"
         await self._message("listen", "Listen.")
         await self.push_frame(LessonTargetFrame(self._step.japanese))
-        await self._message("repeat", "Now repeat.")
+        # VoicevoxTTS keeps a speaking context open until this boundary. Without
+        # it the transport never announces that lesson audio ended, so the PWA
+        # cannot safely release its buffered PCM before inviting the learner to
+        # speak.
+        await self.push_frame(LLMFullResponseEndFrame())
+        await self._message("repeat", "Now repeat. Tap the microphone below, then speak.")
 
     async def _attempt(self, transcript: str) -> None:
         step = self._step
         if step is None:
             return
         if not transcript_matches(step, transcript):
-            await self._message("retry", "I heard something different. Try again.")
+            await self._message(
+                "retry", "I heard something different. Tap the microphone and try again."
+            )
             return
         if self._phase == "repeat":
             self._phase = "challenge"
             await self._message(
                 "challenge",
-                "Now say it from the English meaning.",
+                "Now say it from the English meaning. Tap the microphone when you are ready.",
                 show_japanese=False,
                 show_romaji=False,
             )

@@ -68,13 +68,14 @@ from ocha.tutor.llm import LlmService
 # still speaking. That is not a latency problem, it is the product interrupting a
 # beginner, and beginners pause mid-sentence precisely because they are beginners.
 #
-# 0.6 s is a deliberate trade, not a tuned number: it sits **inside**
-# voice-to-first-audio, so G1b pays for it directly. The principled fix is
+# 1.0 s follows the explicit push-to-talk contract: an untapped turn ends after
+# one second of silence, while a learner who is done sooner can tap Stop. It sits
+# **inside** voice-to-first-audio, so G1b pays for it directly. The principled fix is
 # Pipecat's smart-turn model (ARCHITECTURE §2 lists it alongside silero and it has
 # never been wired up), which decides whether an utterance is *finished* rather
 # than whether the room is quiet. Until then, being slower is better than
 # interrupting.
-VAD_PARAMS = VADParams(stop_secs=0.6)
+VAD_PARAMS = VADParams(stop_secs=1.0)
 
 
 def build_transport(
