@@ -50,6 +50,7 @@ from ocha.scheduling.scheduler import ItemScheduler
 from ocha.tutor.context import MAX_REPLY_TOKENS, build_context
 from ocha.tutor.grammar import GrammarReference
 from ocha.tutor.llm import ChatMessage, LlmService
+from ocha.tutor.reply import TutorReplyError
 from ocha.tutor.turn import TurnResult, conversation_history, ensure_session, finalize_turn
 
 SENTENCE_ENDINGS = "。！？"
@@ -92,15 +93,24 @@ class TutorStage(FrameProcessor):
         # The turn is completed by Phase 1's own code path: firewall on the full
         # text, conservative observations and persistence. Free conversation
         # never creates an FSRS rating.
-        result = finalize_turn(
-            self._conn,
-            self._scheduler,
-            self._reference,
-            user_text,
-            context=ctx,
-            raw=raw,
-            session_id=self._session_id,
-        )
+        try:
+            result = finalize_turn(
+                self._conn,
+                self._scheduler,
+                self._reference,
+                user_text,
+                context=ctx,
+                raw=raw,
+                session_id=self._session_id,
+            )
+        except TutorReplyError as exc:
+            await self.push_frame(
+                OutputTransportMessageUrgentFrame(
+                    message={"type": "tutor_error", "text": str(exc)}
+                )
+            )
+            await self.push_frame(LLMFullResponseEndFrame())
+            return
         self._session_id = result.session_id
         self.last_result = result
 
@@ -122,6 +132,15 @@ class TutorStage(FrameProcessor):
                 )
             )
         elif result.reply:
+            await self.push_frame(
+                OutputTransportMessageUrgentFrame(
+                    message={
+                        "type": "reply_aids",
+                        "romaji": result.romaji,
+                        "meaning_en": result.meaning_en,
+                    }
+                )
+            )
             for sentence in _split_sentences(result.reply):
                 await self.push_frame(LLMTextFrame(sentence))
 

@@ -169,6 +169,19 @@ async def test_a_spoken_utterance_produces_a_spoken_reply(db: sqlite3.Connection
     assert rig.asr.segments, "VAD never handed a segment to the ASR service"
     assert rig.tts.spoken, "the tutor's reply never reached TTS"
     assert any(isinstance(f, TTSAudioRawFrame) for f in rig.down), "no audio came out"
+    aids = [m for m in rig.messages() if m.get("type") == "reply_aids"]
+    assert aids and aids[0]["romaji"] and aids[0]["meaning_en"]
+
+
+async def test_malformed_reply_produces_visible_error_and_no_audio(
+    db: sqlite3.Connection,
+) -> None:
+    rig = Rig(db, StubLlm(reply="{broken json"))
+    await rig.speak()
+
+    errors = [m for m in rig.messages() if m.get("type") == "tutor_error"]
+    assert errors
+    assert not rig.tts.spoken
 
 
 async def test_the_reply_is_synthesised_sentence_by_sentence(db: sqlite3.Connection) -> None:

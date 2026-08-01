@@ -131,6 +131,8 @@ def test_turn_creates_a_session_and_persists(
     conn, sched = env
     res = run_turn(conn, sched, load_grammar(), StubLlm(), "こんにちは。")
     assert res.session_id > 0
+    assert res.romaji
+    assert res.meaning_en == "Test English meaning"
     row = conn.execute("SELECT * FROM turns WHERE id = ?", (res.turn_id,)).fetchone()
     assert row["user_text"] == "こんにちは。"
     assert row["grammar_query"] == 0

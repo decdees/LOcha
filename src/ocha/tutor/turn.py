@@ -18,6 +18,7 @@ from ocha.tutor.firewall import GrammarResponse, apply_firewall
 from ocha.tutor.grammar import GrammarReference
 from ocha.tutor.llm import ChatMessage, LlmService
 from ocha.tutor.observation import Evidence, observe_targets
+from ocha.tutor.reply import parse_tutor_reply
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,8 @@ class TurnResult:
     session_id: int
     turn_id: int
     reply: str | None
+    romaji: str | None
+    meaning_en: str | None
     grammar: GrammarResponse | None
     targets: tuple[str, ...]
     observations: dict[int, Evidence]
@@ -156,7 +159,16 @@ def finalize_turn(
     if not outcome.fired:
         observations = observe_targets(target_items, user_text, previous).observations
 
-    tutor_text = outcome.reply if outcome.reply is not None else ""
+    reply = None
+    romaji = None
+    meaning_en = None
+    if outcome.reply is not None:
+        parsed = parse_tutor_reply(outcome.reply)
+        reply = parsed.japanese
+        romaji = parsed.romaji
+        meaning_en = parsed.meaning_en
+
+    tutor_text = reply or ""
     cur = conn.execute(
         "INSERT INTO turns (session_id, user_text, tutor_text, target_item_ids,"
         " derived_rating, grammar_query) VALUES (?, ?, ?, ?, ?, ?)",
@@ -179,7 +191,9 @@ def finalize_turn(
     return TurnResult(
         session_id=session,
         turn_id=turn_id,
-        reply=outcome.reply,
+        reply=reply,
+        romaji=romaji,
+        meaning_en=meaning_en,
         grammar=outcome.grammar,
         targets=context.target_contents,
         observations=observations,

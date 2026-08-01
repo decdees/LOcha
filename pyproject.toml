@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Self-hosted Japanese conversation tutor"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "cutlet>=0.5.2",
     "fastapi>=0.141.1",
     "fsrs>=6.3.1",
     "fugashi>=1.5.2",
@@ -70,7 +71,7 @@ ignore_errors = true
 # MLX and the Japanese NLP stack ship no type information. Declaring that is
 # honest; adding per-call ignores would scatter the same fact across the code.
 [[tool.mypy.overrides]]
-module = ["mlx.*", "mlx_lm.*", "mlx_whisper.*", "fugashi.*", "parakeet_mlx.*"]
+module = ["cutlet.*", "mlx.*", "mlx_lm.*", "mlx_whisper.*", "fugashi.*", "parakeet_mlx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

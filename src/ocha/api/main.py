@@ -27,6 +27,7 @@ from ocha.scheduling import ItemScheduler
 from ocha.speech.wire import SAMPLE_RATE
 from ocha.tutor.llm import LlmService, MlxLlm
 from ocha.tutor.observation import Evidence
+from ocha.tutor.reply import TutorReplyError
 from ocha.tutor.turn import run_turn
 
 # Set to skip the model load -- for `make dev` when you only want the HTTP surface,
@@ -64,6 +65,8 @@ class TurnResponse(BaseModel):
     session_id: int
     turn_id: int
     reply: str | None = None
+    romaji: str | None = None
+    meaning_en: str | None = None
     grammar: GrammarPayload | None = None
     targets: list[str] = []
     observations: dict[int, Evidence] = {}
@@ -141,6 +144,8 @@ async def turn(req: TurnRequest) -> TurnResponse:
             )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TutorReplyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     grammar = None
     if result.grammar is not None:
@@ -157,6 +162,8 @@ async def turn(req: TurnRequest) -> TurnResponse:
         session_id=result.session_id,
         turn_id=result.turn_id,
         reply=result.reply,
+        romaji=result.romaji,
+        meaning_en=result.meaning_en,
         grammar=grammar,
         targets=list(result.targets),
         observations=result.observations,

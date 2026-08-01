@@ -288,6 +288,20 @@ nvtx = [
 ]
 
 [[package]]
+name = "cutlet"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fugashi" },
+    { name = "jaconv" },
+    { name = "mojimoji" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/db/03c700e115107f8d75b44c4648535935188f11923cf884c1cd90401afdff/cutlet-0.5.2.tar.gz", hash = "sha256:700b9b241ff2702d01b85431743e6401ca31eb18ab08b4508ee8dada368de529", size = 414731, upload-time = "2026-07-01T07:07:01.307Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/15/90bdc2301f115774cfbec19b8c97bc16a5551dbdc7a32ee5d94cbef80050/cutlet-0.5.2-py3-none-any.whl", hash = "sha256:a4b0b750854dd007a8691be6db20bb696dd175e92357cfde55a0fd450ab4caff", size = 12780, upload-time = "2026-07-01T07:07:02.731Z" },
+]
+
+[[package]]
 name = "dacite"
 version = "1.9.2"
 source = { registry = "https://pypi.org/simple" }
@@ -552,6 +566,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jaconv"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/0e/9fffaacda59bdfa479372c71d18d72968d2af5a36a5a2086b02a60124b98/jaconv-0.5.0.tar.gz", hash = "sha256:53f6f968276846716f0f37100a6d5c7308cfa1e0c714eb41287d5bb09345c40f", size = 21816, upload-time = "2026-02-08T11:15:57.07Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/da/9657d637bcacdbaf6a914ce504000da5639f9d945f8d3552a940f021d6c0/jaconv-0.5.0-py3-none-any.whl", hash = "sha256:2914114fe761ca49fc7089e25e6ad4a400c26f262ffce84e13b176916b71610a", size = 16831, upload-time = "2026-02-08T11:15:55.322Z" },
+]
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -804,6 +827,20 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/b7/a35232812a2ccfffcb7614ba96a91338551a660a0e9815cee668bf5743f0/mlx_whisper-0.4.3-py3-none-any.whl", hash = "sha256:6b82b6597a994643a3e5496c7bc229a672e5ca308458455bfe276e76ae024489", size = 890544, upload-time = "2025-08-29T14:56:13.815Z" },
+]
+
+[[package]]
+name = "mojimoji"
+version = "0.0.13"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/fb/ee22357cd7622fb879fac575feaffc54469ed9a0c1d9073355b1ebc62b7f/mojimoji-0.0.13.tar.gz", hash = "sha256:0e6d2fba22cc8bf132a5bdf3a964296d9287a618d09681a12868f0fd518e4230", size = 5010, upload-time = "2024-01-12T10:38:30.532Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/51/4f8fb6d6d96ef623d5014b8f5b006c697d045d2df5696194811246570ac9/mojimoji-0.0.13-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:9d8f1618fb9b100bba172f2629df20e6db591ce5912996ac630d215627dd7553", size = 49596, upload-time = "2024-01-12T10:37:59.259Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/12/b21c4ecf2fb5d162c0f6fde9dc401cc9a730dab4f85373ca25c350c204e7/mojimoji-0.0.13-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:ad4a2e1fb2b643ac3166f30be97a95ad1877e4670c6dc656c4ef580681b84c49", size = 46720, upload-time = "2024-01-12T10:38:00.44Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/85/954d806efbead02c87320b96436d2834d7f2f164de3ef4dd7e5f71f92f71/mojimoji-0.0.13-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:d001f2042073b194bad071925b7ee36d9f320b79c93b4463df87267fee986e86", size = 204364, upload-time = "2024-01-12T10:38:02.149Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/bc/f262abd0bec2316cbfe972ba2a79c0d5836f0f536877fa59347a76065f80/mojimoji-0.0.13-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3c5fd38d1f4079dc54ac79f93b0e5442c660b297a3868308251ffc37beb1216b", size = 211246, upload-time = "2024-01-12T10:38:03.296Z" },
+    { url = "https://files.pythonhosted.org/packages/51/a4/5ec16d4570a4f64d4abf70d21282d4c59e0665fa0badf2793c14263765bc/mojimoji-0.0.13-cp312-cp312-win32.whl", hash = "sha256:c97ee81e4f7083df13b8ef690366e67afd8170c8f7c259161bae6ed12d41fe5b", size = 38641, upload-time = "2024-01-12T10:38:05.306Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/da/aa46aa90ddeab3a00b8c36d5f3d64b630a0a1fa8ad6468f10365ffbb80a2/mojimoji-0.0.13-cp312-cp312-win_amd64.whl", hash = "sha256:6e442d6dcfb2fc1a08eea86da80ebe71ad63fbc4217fa4faede7023c0b51d055", size = 42280, upload-time = "2024-01-12T10:38:07.045Z" },
 ]
 
 [[package]]
@@ -1140,6 +1177,7 @@ name = "ocha"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cutlet" },
     { name = "fastapi" },
     { name = "fsrs" },
     { name = "fugashi" },
@@ -1167,6 +1205,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cutlet", specifier = ">=0.5.2" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "fsrs", specifier = ">=6.3.1" },
     { name = "fugashi", specifier = ">=1.5.2" },

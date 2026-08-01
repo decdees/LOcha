@@ -23,6 +23,7 @@ would be a speculative abstraction with one implementation.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -234,7 +235,7 @@ class StubLlm:
     ) -> str:
         self.calls.append((system_prompt, user_text))
         self.histories.append(tuple(history))
-        return self.reply
+        return self._response()
 
     def stream(
         self,
@@ -246,7 +247,15 @@ class StubLlm:
     ) -> Iterator[str]:
         self.calls.append((system_prompt, user_text))
         self.histories.append(tuple(history))
-        yield from self.reply
+        yield self._response()
+
+    def _response(self) -> str:
+        if "GRAMMAR_QUERY" in self.reply or self.reply.lstrip().startswith("{"):
+            return self.reply
+        return json.dumps(
+            {"japanese": self.reply, "english": "Test English meaning"},
+            ensure_ascii=False,
+        )
 
     def status(self) -> LlmStatus:
         return LlmStatus(model="stub", loaded=True, resident_gb=0.0)

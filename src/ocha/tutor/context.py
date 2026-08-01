@@ -30,7 +30,7 @@ from ocha.tutor.firewall import SENTINEL
 # T0.4: not 8k. See module docstring.
 MAX_CONTEXT_TOKENS = 2048
 # FR-3: enforced by prompt AND max_tokens, because prompts get ignored.
-MAX_REPLY_TOKENS = 64
+MAX_REPLY_TOKENS = 128
 
 LEVEL = "beginner"
 
@@ -46,7 +46,11 @@ MAX_INTRODUCE = 3
 # breath. TARGET is therefore split by whether the item is already known, which
 # encodes FR-3's "at most one new word per turn, glossed" explicitly instead of
 # leaving the model to reconcile it.
-TEMPLATE = """You are a Japanese conversation partner. Reply in 1-2 short sentences.
+TEMPLATE = """You are a Japanese conversation partner. The learner is an absolute beginner.
+Reply in 1-2 short sentences in Japanese and give their complete English meaning.
+Return exactly one JSON object with exactly these string fields:
+{{"japanese":"...","english":"..."}}
+Do not put the JSON in a Markdown code fence.
 
 VOCABULARY: Use only words from KNOWN, plus at most one NEW word per reply.
 Never gloss a word that is already in KNOWN -- the learner knows it.
@@ -62,7 +66,9 @@ REGISTER: Always use polite です/ます form. Never mix polite and plain forms
 
 AVOID: Do not use grammar beyond {level}.
 
-Never break character to explain grammar. If asked a grammar question,
+Only treat a question about Japanese form, meaning, or usage as a grammar question.
+Language-preference requests such as "Can you speak in English?" are not grammar questions.
+Never break character to explain grammar. If asked an actual Japanese grammar question,
 respond with exactly: {sentinel}"""
 
 
