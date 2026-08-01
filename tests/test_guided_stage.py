@@ -65,6 +65,11 @@ async def test_guided_step_requires_repeat_then_hidden_recall(tmp_path: Path) ->
     challenge = next(message for message in messages if message["phase"] == "challenge")
     assert challenge["show_japanese"] is False
     assert challenge["show_romaji"] is False
+    assert any(
+        isinstance(frame, OutputTransportMessageUrgentFrame)
+        and frame.message == {"type": "state", "state": "idle"}
+        for frame in down
+    )
     assert any(message["phase"] == "success" for message in messages)
     assert (
         conn.execute(

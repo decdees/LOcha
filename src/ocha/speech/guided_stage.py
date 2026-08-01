@@ -21,7 +21,7 @@ from ocha.lessons import (
     record_progress,
     transcript_matches,
 )
-from ocha.speech.wire import LessonActionFrame
+from ocha.speech.wire import LessonActionFrame, state_message
 
 
 class LessonTargetFrame(TextFrame):
@@ -113,6 +113,10 @@ class GuidedLessonStage(FrameProcessor):
         await self.push_frame(LLMFullResponseEndFrame())
         await self._message("repeat", "Now repeat. Tap the microphone below, then speak.")
 
+    async def _ready(self) -> None:
+        """Release tap-to-talk after a lesson outcome that has no audio boundary."""
+        await self.push_frame(OutputTransportMessageUrgentFrame(message=state_message("idle")))
+
     async def _attempt(self, transcript: str) -> None:
         step = self._step
         if step is None:
@@ -121,6 +125,7 @@ class GuidedLessonStage(FrameProcessor):
             await self._message(
                 "retry", "I heard something different. Tap the microphone and try again."
             )
+            await self._ready()
             return
         if self._phase == "repeat":
             self._phase = "challenge"
@@ -130,6 +135,7 @@ class GuidedLessonStage(FrameProcessor):
                 show_japanese=False,
                 show_romaji=False,
             )
+            await self._ready()
             return
         record_progress(self._conn, step.id, "completed")
         await self._message("success", "Good job.")
@@ -146,6 +152,7 @@ class GuidedLessonStage(FrameProcessor):
             await self._present()
         elif frame.action == "reveal":
             await self._message("challenge", "Here is the answer. Try it again.")
+            await self._ready()
         else:
             record_progress(self._conn, step.id, "skipped")
             await self._message("success", "Skipped.")
