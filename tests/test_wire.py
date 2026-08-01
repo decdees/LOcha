@@ -215,6 +215,10 @@ def test_pwa_uses_safari_capture_fallback_before_starting_lesson() -> None:
     assert "audioCtx.createScriptProcessor(4096, 1, 1)" in client
     assert "node.connect(muteNode).connect(audioCtx.destination)" in client
     assert client.index("new AudioWorkletNode") < client.index("ws = new WebSocket")
+    assert client.index("audioCtx = new AudioContext()") < client.index(
+        "navigator.mediaDevices.getUserMedia"
+    )
+    assert "English audio timed out" in client
 
 
 async def test_setup_rejects_a_rate_mismatch(ser: OchaSerializer) -> None:

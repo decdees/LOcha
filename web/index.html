@@ -359,17 +359,22 @@ async function processMediaQueue() {
   if (mediaBusy || !mediaQueue.length || !audioCtx) return;
   mediaBusy = true;
   updateMicButton();
-  while (mediaQueue.length && audioCtx) {
-    const item = mediaQueue.shift();
-    if (item.type === 'speech') await speakLocalEnglish(item.text);
-    else {
-      for (const buffer of item.buffers) play(buffer);
-      const waitMs = Math.max(0, (playAt - audioCtx.currentTime) * 1000);
-      await new Promise(resolve => setTimeout(resolve, waitMs));
+  try {
+    while (mediaQueue.length && audioCtx) {
+      const item = mediaQueue.shift();
+      if (item.type === 'speech') await speakLocalEnglish(item.text);
+      else {
+        for (const buffer of item.buffers) play(buffer);
+        const waitMs = Math.max(0, (playAt - audioCtx.currentTime) * 1000);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      }
     }
+  } catch (err) {
+    voiceStatus.textContent = `Audio could not play: ${err.message}`;
+  } finally {
+    mediaBusy = false;
+    updateMicButton();
   }
-  mediaBusy = false;
-  updateMicButton();
 }
 
 async function localEnglishVoice() {
@@ -395,10 +400,22 @@ async function speakLocalEnglish(text) {
   voiceStatus.textContent = '';
   await new Promise(resolve => {
     const utterance = new SpeechSynthesisUtterance(text);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      voiceStatus.textContent = 'English audio timed out; the instruction remains visible.';
+      speechSynthesis.cancel();
+      finish();
+    }, 5000);
     utterance.voice = voice;
     utterance.lang = voice.lang;
     utterance.rate = 0.9;
-    utterance.onend = utterance.onerror = resolve;
+    utterance.onend = utterance.onerror = finish;
     speechSynthesis.speak(utterance);
   });
 }
@@ -538,6 +555,15 @@ async function start() {
 }
 
 async function connect() {
+  // iPhone Safari only unlocks audible Web Audio while the tap gesture is still
+  // active. Do this before awaiting microphone permission or server startup.
+  audioCtx = new AudioContext();
+  const unlock = audioCtx.createBufferSource();
+  unlock.buffer = audioCtx.createBuffer(1, 1, RATE);
+  unlock.connect(audioCtx.destination);
+  unlock.start();
+  await audioCtx.resume();
+
   stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, sampleRate: RATE, echoCancellation: true,
              noiseSuppression: true, autoGainControl: true },
@@ -549,8 +575,6 @@ async function connect() {
   console.log('capture:', track.label, track.getSettings());
   track.enabled = false;
 
-  audioCtx = new AudioContext();
-  await audioCtx.resume();
   captureSource = audioCtx.createMediaStreamSource(stream);
   try {
     const workletUrl = URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' }));
