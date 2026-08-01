@@ -2,9 +2,9 @@
 
 *Language Ocha — like tea or coffee starts the day, start the day learning a language.*
 
-A self-hosted Japanese conversation tutor that runs entirely on one MacBook Pro, talks back in real time, and costs **$0/month**. No cloud API is called from any code path — that is a hard architectural constraint, tested by a suite that fails if an outbound request appears.
+A self-hosted beginner Japanese speaking tutor that runs entirely on one MacBook Pro, talks back in real time, and costs **$0/month**. No cloud API is called from any code path — that is a hard architectural constraint, tested by a suite that fails if an outbound request appears.
 
-You speak Japanese into an iPhone. The Mac listens, thinks, and answers out loud. What it chooses to say is steered by a spaced-repetition scheduler, so the conversation keeps dragging you back to the words you are about to forget.
+The iPhone PWA opens in **Guided Lessons**: English directions introduce one curated Japanese phrase, VOICEVOX models it, and the learner repeats and recalls it. **Conversation** is optional and shows Japanese, local romaji, and a complete English meaning while speaking only the Japanese answer.
 
 ---
 
@@ -19,6 +19,11 @@ Three things, in order of how much they matter:
 The learner's L1 is Hindi, which the design treats as information rather than trivia: Hindi and Japanese genuinely share SOV order, postpositions and pro-drop, but Hindi's ergative ने is *not* Japanese が, and Hindi's weight-based stress actively interferes with Japanese pitch. Reference entries carry an `interference_warning` flag for exactly these.
 
 ---
+
+## The two learning modes
+
+- **Guided Lessons (default):** curated greetings and useful requests; listen, repeat, then recall from English. Exact ASR matches advance the lesson but are not presented as pronunciation scores and never change FSRS.
+- **Conversation:** the quarantined model returns validated Japanese and English fields; romaji is generated locally with Cutlet. Only the Japanese field reaches VOICEVOX.
 
 ## The conversation loop
 
@@ -153,4 +158,4 @@ Design documents are kept honest rather than tidy: where a measurement contradic
 
 ## Stack
 
-Python 3.12 · `uv` · FastAPI · SQLite (WAL) · MLX · Pipecat 1.6 · `py-fsrs` · `fugashi`/`unidic-lite` · installable PWA · `ruff` + `mypy --strict` + `pytest`
+Python 3.12 · `uv` · FastAPI · SQLite (WAL) · MLX · Pipecat 1.6 · `py-fsrs` · `fugashi`/`unidic-lite` · Cutlet · installable PWA · `ruff` + `mypy --strict` + `pytest`

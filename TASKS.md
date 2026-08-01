@@ -18,6 +18,15 @@ Reference documents in this repo:
 - [ ] Re-record ASR separately through iPhone microphone and AirPods/HFP.
 - [ ] Run the unfiltered 50-turn iPhone v2 gate. **G1a and G1b remain unproven.**
 
+## Beginner-first learning — 1 August 2026
+
+- [x] Make Guided Lessons the first-run default and keep Conversation selectable.
+- [x] Add two curated listen/repeat/recall modules with exact accepted transcripts.
+- [x] Keep guided progress separate from FSRS and pronunciation scoring.
+- [x] Add local-only English directions, ordered Japanese playback, and microphone suppression while Ocha speaks.
+- [x] Show validated Japanese, local romaji, and complete English meaning in Conversation mode.
+- [ ] Complete the live iPhone walkthrough of both modes.
+
 ---
 
 ## Phase 0 — Bake-off *(gate: no application code until complete)*

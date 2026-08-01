@@ -70,7 +70,8 @@ Single user, self-hosting. Design parameters that drive functional requirements:
 - Transcript displayed to user for every turn. Non-negotiable — it is the only way to catch ASR error.
 
 ### FR-3 — Conversation
-- LLM replies in Japanese, 1–2 sentences maximum, enforced by both prompt and `max_tokens`.
+- Guided Lessons are the first-run default for absolute beginners. Curated targets progress through listen, repeat, and English-only recall; exact ASR recognition is not a pronunciation score and does not create an FSRS rating.
+- Free Conversation is optional. The LLM returns validated Japanese and English fields, 1–2 Japanese sentences maximum; the PWA displays local romaji and the complete English meaning while speaking only Japanese.
 - Vocabulary steered toward the user's known-item pool. At most one new word per turn is requested and glossed in English; this is model steering, not deterministic enforcement.
 - Never breaks character to explain grammar (see FR-5).
 

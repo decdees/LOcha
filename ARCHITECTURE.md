@@ -24,6 +24,8 @@ Three things invalidate parts of the earlier plan:
 | Blocking schedule risk | Hard external deadline, October 2026 |
 | Pedagogical anchor | Falou-style drilling + free conversation, FSRS-scheduled |
 
+The PWA exposes both paths explicitly. Guided Lessons are deterministic package data and the default for a new learner; Conversation is an optional local-LLM path with Japanese audio plus romaji and English display aids. Drill completion is stored separately from FSRS because immediate prompted repetition is not evidence of spaced recall.
+
 **The hard requirement that drives everything:** this is a *pronunciation-sensitive* language app. Correct pitch accent in the audio the learner hears, and reliable measurement of the audio the learner produces, matter more than conversational sparkle. That pushes several choices away from the obvious ones.
 
 ---
@@ -301,7 +303,9 @@ weak    = fsrs.lowest_stability(limit=3) # struggling items
 These go into the system prompt as strong **steering, not deterministic enforcement**:
 
 ```
-You are a Japanese conversation partner. Reply in 1–2 short sentences.
+You are a Japanese conversation partner. The learner is an absolute beginner.
+Reply in 1–2 short Japanese sentences and return exactly:
+{"japanese":"...","english":"..."}
 
 VOCABULARY: Use only words from KNOWN. If you must introduce a new word,
 introduce exactly one and gloss it in English in parentheses.
@@ -314,7 +318,8 @@ REGISTER: Always use polite です/ます form. Never mix polite and plain forms
 
 AVOID: Do not use grammar beyond {level}.
 
-Never break character to explain grammar. If asked a grammar question,
+Only questions about Japanese form, meaning, or usage are grammar questions.
+Never break character to explain grammar. If asked an actual grammar question,
 respond with exactly: [GRAMMAR_QUERY]
 ```
 
@@ -334,7 +339,7 @@ A 4-bit local model will confidently give you a wrong explanation of は vs が,
 
 ### 7.3 Observing a conversational turn
 
-Free conversation can establish only that a target surface or lemma occurred. It stores one `mentioned` or `mentioned_after_prompt` observation per turn/item and never calls `record_review()`. Malformed Japanese such as `ご飯を食べるです` may contain `食べる`; that is not proof of correct recall. Only a future explicit validated drill may produce an FSRS rating.
+Free conversation can establish only that a target surface or lemma occurred. It stores one `mentioned` or `mentioned_after_prompt` observation per turn/item and never calls `record_review()`. Malformed Japanese such as `ご飯を食べるです` may contain `食べる`; that is not proof of correct recall. Guided completion is also kept separate from FSRS: prompted ASR recognition advances the lesson UI but is not a pronunciation or spaced-recall grade.
 
 ---
 
