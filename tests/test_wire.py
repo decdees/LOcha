@@ -203,7 +203,10 @@ def test_pwa_defaults_to_guided_and_never_selects_remote_english_voice() -> None
     client = (Path(__file__).parents[1] / "web" / "index.html").read_text()
     assert "currentMode = 'guided'" in client
     assert "voice.localService &&" in client
-    assert "!appIsSpeaking" in client
+    assert "recording && !appIsSpeaking" in client
+    assert "track.enabled = false" in client
+    assert "new Int16Array(RATE).buffer" in client
+    assert "pendingGuidedInstruction" in client
     assert "/ws?mode=${currentMode}" in client
 
 

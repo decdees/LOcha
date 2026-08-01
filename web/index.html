@@ -71,12 +71,17 @@
   .instruction { font-weight:600; margin-bottom:.5rem; }
   .actions { display:flex; gap:.4rem; margin-top:.7rem; }
   .actions button { padding:.35rem .75rem; font-size:.85rem; }
+  #talk { position:sticky; bottom:max(.75rem, env(safe-area-inset-bottom)); z-index:2;
+          padding:.75rem 0; background:linear-gradient(transparent, var(--bg) 30%); }
+  #mic { width:100%; min-height:3.5rem; border-radius:1rem; border:0;
+         background:var(--accent); color:var(--bg); font-weight:650; font-size:1.05rem; }
+  #mic[data-recording="true"] { background:#dc2626; color:white; }
+  #mic-hint { text-align:center; color:var(--muted); font-size:.78rem; margin-top:.25rem; }
 </style>
 </head>
 <body>
 <header>
   <h1>Ocha 🍵</h1>
-  <button id="mic">Start</button>
   <span id="state"><span id="dot"></span><span id="label">idle</span></span>
 </header>
 <div id="mode" role="group" aria-label="Learning mode">
@@ -86,6 +91,10 @@
 <div id="mode-help"></div>
 <div id="voice-status" role="status"></div>
 <div id="log"></div>
+<div id="talk">
+  <button id="mic" type="button">Start guided lesson</button>
+  <div id="mic-hint">Audio stays off until you tap.</div>
+</div>
 
 <script type="module">
 const RATE = 16000;           // must match speech/wire.py; not negotiated
@@ -94,6 +103,7 @@ const log = document.getElementById('log');
 const dot = document.getElementById('dot');
 const label = document.getElementById('label');
 const micBtn = document.getElementById('mic');
+const micHint = document.getElementById('mic-hint');
 const modeHelp = document.getElementById('mode-help');
 const voiceStatus = document.getElementById('voice-status');
 const modeButtons = [...document.querySelectorAll('#mode button')];
@@ -101,6 +111,7 @@ const modeButtons = [...document.querySelectorAll('#mode button')];
 const HEADER_BYTES = 26;      // OCH1 + version + kind + u32 seq + UUID
 let ws, audioCtx, node, stream, playAt = 0, interimEl = null, tutorEl = null;
 let lessonEl = null, guidedAudioBatch = [], mediaQueue = [], mediaBusy = false;
+let pendingGuidedInstruction = '', recording = false, processing = false;
 let currentMode = localStorage.getItem('ocha.mode');
 if (!['guided', 'conversation'].includes(currentMode)) currentMode = 'guided';
 const scheduled = new Map(); // exchange UUID -> {source,start,end,seq,kind}[]
@@ -151,6 +162,35 @@ registerProcessor('capture', Capture);
 function setState(s) {
   dot.className = s;
   label.textContent = s;
+  if (['transcribing', 'thinking', 'speaking'].includes(s)) processing = true;
+  if (s === 'idle' && !recording) processing = false;
+  updateMicButton();
+}
+
+function updateMicButton() {
+  const connected = ws?.readyState === WebSocket.OPEN;
+  micBtn.dataset.recording = String(recording);
+  if (!connected) {
+    micBtn.textContent = currentMode === 'guided' ? 'Start guided lesson' : 'Start conversation';
+    micBtn.disabled = false;
+    micHint.textContent = 'Audio stays off until you tap.';
+  } else if (recording) {
+    micBtn.textContent = 'Stop listening';
+    micBtn.disabled = false;
+    micHint.textContent = 'Speak now. Tap again when you finish.';
+  } else if (mediaBusy) {
+    micBtn.textContent = 'Listen…';
+    micBtn.disabled = true;
+    micHint.textContent = 'The microphone is off while Ocha speaks.';
+  } else if (processing) {
+    micBtn.textContent = 'Processing…';
+    micBtn.disabled = true;
+    micHint.textContent = 'The microphone is off while Ocha responds.';
+  } else {
+    micBtn.textContent = 'Tap to speak';
+    micBtn.disabled = false;
+    micHint.textContent = 'Tap, speak, then tap again—or pause for one second.';
+  }
 }
 
 function turn(kind, who) {
@@ -170,6 +210,7 @@ function updateMode() {
   modeHelp.textContent = currentMode === 'guided'
     ? 'Start here: listen, repeat, then recall useful Japanese.'
     : 'Japanese audio with romaji and a complete English meaning.';
+  updateMicButton();
 }
 
 for (const button of modeButtons) {
@@ -198,6 +239,14 @@ function onMessage(ev) {
     throw new Error('Unattributed Ocha JSON event');
   }
   if (m.type === 'state') {
+    if (m.state === 'transcribing' && recording) stopRecording(false);
+    if (m.state === 'idle' && currentMode === 'guided') {
+      flushGuidedAudio();
+      if (pendingGuidedInstruction) {
+        enqueueEnglish(pendingGuidedInstruction);
+        pendingGuidedInstruction = '';
+      }
+    }
     const changed = label.textContent !== m.state;
     setState(m.state);
     if (changed) retainVisible(m);
@@ -221,9 +270,9 @@ function onMessage(ev) {
     addAid(tutorEl, 'meaning', m.meaning_en);
     retainVisible(m);
   } else if (m.type === 'lesson') {
-    flushGuidedAudio();
     renderLesson(m);
-    enqueueEnglish(m.instruction_en);
+    if (m.phase === 'repeat') pendingGuidedInstruction = m.instruction_en;
+    else enqueueEnglish(m.instruction_en);
     retainVisible(m);
   } else if (m.type === 'grammar') {
     grammar(m);
@@ -308,6 +357,7 @@ function enqueueEnglish(text) {
 async function processMediaQueue() {
   if (mediaBusy || !mediaQueue.length || !audioCtx) return;
   mediaBusy = true;
+  updateMicButton();
   while (mediaQueue.length && audioCtx) {
     const item = mediaQueue.shift();
     if (item.type === 'speech') await speakLocalEnglish(item.text);
@@ -318,6 +368,7 @@ async function processMediaQueue() {
     }
   }
   mediaBusy = false;
+  updateMicButton();
 }
 
 async function localEnglishVoice() {
@@ -494,6 +545,7 @@ async function connect() {
   // unanswerable without knowing which microphone produced the audio.
   const track = stream.getAudioTracks()[0];
   console.log('capture:', track.label, track.getSettings());
+  track.enabled = false;
 
   audioCtx = new AudioContext();
   await audioCtx.resume();
@@ -503,26 +555,48 @@ async function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?mode=${currentMode}`);
   ws.binaryType = 'arraybuffer';
   ws.onmessage = onMessage;
-  ws.onclose = () => { setState('idle'); micBtn.disabled = false; micBtn.textContent = 'Start'; };
+  ws.onclose = () => {
+    recording = processing = false;
+    setState('idle');
+    micBtn.onclick = start;
+  };
   await new Promise(r => ws.onopen = r);
 
   node = new AudioWorkletNode(audioCtx, 'capture');
   node.port.onmessage = e => {
     const appIsSpeaking = mediaBusy || audioCtx.currentTime < playAt;
-    if (ws.readyState === 1 && !appIsSpeaking) ws.send(e.data);
+    if (ws.readyState === 1 && recording && !appIsSpeaking) ws.send(e.data);
   };
   audioCtx.createMediaStreamSource(stream).connect(node);
   // Not connected to destination: the worklet produces no output, and routing the
   // microphone to the speakers is a feedback loop.
 
-  micBtn.disabled = false;
-  micBtn.textContent = 'Stop';
-  micBtn.onclick = stop;
+  recording = processing = false;
+  micBtn.onclick = startRecording;
+  setState('idle');
+}
+
+function startRecording() {
+  if (ws?.readyState !== WebSocket.OPEN || mediaBusy || processing) return;
+  recording = true;
+  stream?.getAudioTracks().forEach(track => { track.enabled = true; });
+  micBtn.onclick = () => stopRecording(true);
   setState('listening');
 }
 
+function stopRecording(sendTrailingSilence) {
+  if (!recording) return;
+  recording = false;
+  stream?.getAudioTracks().forEach(track => { track.enabled = false; });
+  if (sendTrailingSilence && ws?.readyState === WebSocket.OPEN) {
+    ws.send(new Int16Array(RATE).buffer);
+  }
+  processing = true;
+  micBtn.onclick = startRecording;
+  setState('transcribing');
+}
+
 function stop() {
-  flushGuidedAudio();
   ws?.close();
   stream?.getTracks().forEach(t => t.stop());
   audioCtx?.close();
@@ -532,6 +606,8 @@ function stop() {
   guidedAudioBatch = [];
   mediaQueue = [];
   mediaBusy = false;
+  pendingGuidedInstruction = '';
+  recording = processing = false;
   window.speechSynthesis?.cancel();
   micBtn.textContent = 'Start';
   micBtn.onclick = start;
