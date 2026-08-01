@@ -18,7 +18,11 @@ def conn(tmp_path: Path) -> sqlite3.Connection:
 
 def test_migrations_apply_and_are_idempotent(tmp_path: Path) -> None:
     c = connect(tmp_path / "t.db")
-    assert migrate(c) == ["001_init.sql", "002_item_observations.sql"]
+    assert migrate(c) == [
+        "001_init.sql",
+        "002_item_observations.sql",
+        "003_guided_progress.sql",
+    ]
     assert migrate(c) == []  # re-running must be a no-op
 
 

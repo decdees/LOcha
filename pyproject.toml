@@ -41,7 +41,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ocha"]
-include = ["src/ocha/resources/grammar.json"]
+include = ["src/ocha/resources/*.json"]
 
 [tool.ruff]
 line-length = 100

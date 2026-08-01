@@ -1,0 +1,86 @@
+{
+  "modules": [
+    {
+      "id": "greetings",
+      "title": "Greetings",
+      "steps": [
+        {
+          "id": "greeting-hello",
+          "japanese": "こんにちは",
+          "romaji": "konnichiwa",
+          "meaning_en": "Hello",
+          "accepted_transcripts": ["こんにちは"]
+        },
+        {
+          "id": "greeting-thanks",
+          "japanese": "ありがとうございます",
+          "romaji": "arigatou gozaimasu",
+          "meaning_en": "Thank you",
+          "accepted_transcripts": ["ありがとうございます", "有難うございます"]
+        },
+        {
+          "id": "greeting-excuse-me",
+          "japanese": "すみません",
+          "romaji": "sumimasen",
+          "meaning_en": "Excuse me / sorry",
+          "accepted_transcripts": ["すみません"]
+        }
+      ]
+    },
+    {
+      "id": "useful-requests",
+      "title": "Useful requests",
+      "steps": [
+        {
+          "id": "request-tea",
+          "japanese": "お茶",
+          "romaji": "ocha",
+          "meaning_en": "Tea",
+          "accepted_transcripts": ["お茶", "おちゃ"]
+        },
+        {
+          "id": "request-please",
+          "japanese": "ください",
+          "romaji": "kudasai",
+          "meaning_en": "Please give me",
+          "accepted_transcripts": ["ください", "下さい"]
+        },
+        {
+          "id": "request-tea-please",
+          "japanese": "お茶をください",
+          "romaji": "ocha o kudasai",
+          "meaning_en": "Tea, please",
+          "accepted_transcripts": ["お茶をください", "おちゃをください", "お茶を下さい"]
+        },
+        {
+          "id": "request-water",
+          "japanese": "水",
+          "romaji": "mizu",
+          "meaning_en": "Water",
+          "accepted_transcripts": ["水", "みず"]
+        },
+        {
+          "id": "request-water-please",
+          "japanese": "水をください",
+          "romaji": "mizu o kudasai",
+          "meaning_en": "Water, please",
+          "accepted_transcripts": ["水をください", "みずをください", "水を下さい"]
+        },
+        {
+          "id": "request-this",
+          "japanese": "これ",
+          "romaji": "kore",
+          "meaning_en": "This",
+          "accepted_transcripts": ["これ"]
+        },
+        {
+          "id": "request-this-please",
+          "japanese": "これをください",
+          "romaji": "kore o kudasai",
+          "meaning_en": "This, please",
+          "accepted_transcripts": ["これをください", "これを下さい"]
+        }
+      ]
+    }
+  ]
+}
