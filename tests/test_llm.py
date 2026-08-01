@@ -154,14 +154,18 @@ def test_stream_does_not_create_or_pass_a_mutable_prompt_cache(
 
 def test_stub_records_what_it_was_given() -> None:
     stub = StubLlm(reply="はい。")
-    assert stub.generate("SYS", "USER") == "はい。"
+    assert stub.generate("SYS", "USER") == (
+        '{"japanese": "はい。", "english": "Test English meaning"}'
+    )
     assert stub.calls == [("SYS", "USER")]
 
 
 def test_stub_accepts_explicit_history() -> None:
     stub = StubLlm(reply="はい。")
     history = (ChatMessage("user", "前"), ChatMessage("assistant", "返答"))
-    assert stub.generate("SYS", "USER", history=history) == "はい。"
+    assert stub.generate("SYS", "USER", history=history) == (
+        '{"japanese": "はい。", "english": "Test English meaning"}'
+    )
     assert stub.histories == [history]
 
 

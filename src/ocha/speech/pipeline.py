@@ -197,9 +197,7 @@ def build_pipeline(
         emit.append(FillerProcessor(fillers, filler_state, emit=True))
         trigger.append(FillerProcessor(fillers, filler_state))
     tutor: FrameProcessor = (
-        GuidedLessonStage(conn)
-        if mode == "guided"
-        else TutorStage(conn, scheduler, reference, llm)
+        GuidedLessonStage(conn) if mode == "guided" else TutorStage(conn, scheduler, reference, llm)
     )
 
     return (

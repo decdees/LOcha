@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pipecat.frames.frames import (
@@ -182,11 +183,14 @@ async def test_lesson_action_is_typed_and_bounded(ser: OchaSerializer) -> None:
             }
         )
     )
-    assert isinstance(frame, LessonActionFrame)
-    assert frame.action == "replay"
-    assert await ser.deserialize(
-        '{"type":"lesson_action","action":"delete","lesson_id":"x","step_id":"y"}'
-    ) is None
+    assert frame is not None and frame.__class__.__name__ == LessonActionFrame.__name__
+    assert cast(LessonActionFrame, frame).action == "replay"
+    assert (
+        await ser.deserialize(
+            '{"type":"lesson_action","action":"delete","lesson_id":"x","step_id":"y"}'
+        )
+        is None
+    )
 
 
 def test_pwa_buffers_playback_by_150ms() -> None:

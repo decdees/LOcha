@@ -105,9 +105,7 @@ class TutorStage(FrameProcessor):
             )
         except TutorReplyError as exc:
             await self.push_frame(
-                OutputTransportMessageUrgentFrame(
-                    message={"type": "tutor_error", "text": str(exc)}
-                )
+                OutputTransportMessageUrgentFrame(message={"type": "tutor_error", "text": str(exc)})
             )
             await self.push_frame(LLMFullResponseEndFrame())
             return

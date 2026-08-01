@@ -62,8 +62,5 @@ def record_progress(conn: sqlite3.Connection, step_id: str, status: ProgressStat
 
 
 def current_step(conn: sqlite3.Connection, lessons: tuple[LessonStep, ...]) -> LessonStep | None:
-    done = {
-        str(row["step_id"])
-        for row in conn.execute("SELECT step_id FROM guided_progress")
-    }
+    done = {str(row["step_id"]) for row in conn.execute("SELECT step_id FROM guided_progress")}
     return next((step for step in lessons if step.id not in done), None)
