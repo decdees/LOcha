@@ -195,6 +195,14 @@ def test_pwa_buffers_playback_by_150ms() -> None:
     assert "if (playAt <= now) playAt = now + PLAYBACK_BUFFER_SECONDS;" in client
 
 
+def test_pwa_defaults_to_guided_and_never_selects_remote_english_voice() -> None:
+    client = (Path(__file__).parents[1] / "web" / "index.html").read_text()
+    assert "currentMode = 'guided'" in client
+    assert "voice.localService &&" in client
+    assert "!appIsSpeaking" in client
+    assert "/ws?mode=${currentMode}" in client
+
+
 async def test_setup_rejects_a_rate_mismatch(ser: OchaSerializer) -> None:
     """A resample would be inaudible here and show up as an ASR accuracy bug."""
     with pytest.raises(ValueError, match="16000"):

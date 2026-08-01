@@ -62,6 +62,15 @@
   .warn { margin-top:.5rem; font-size:.85rem; color:#eab308; }
   ul { margin:.4rem 0 0; padding-left:1.1rem; }
   li { font-size:.95rem; }
+  #mode { display:flex; gap:.25rem; margin-bottom:1rem; }
+  #mode button { flex:1; border-radius:.65rem; }
+  #mode button[aria-pressed="true"] { background:var(--accent); color:var(--bg); }
+  #mode-help, #voice-status { color:var(--muted); font-size:.8rem; margin:-.6rem 0 1rem; }
+  .romaji { color:var(--accent); font-size:.95rem; margin-top:.2rem; }
+  .meaning { color:var(--muted); font-size:.95rem; }
+  .instruction { font-weight:600; margin-bottom:.5rem; }
+  .actions { display:flex; gap:.4rem; margin-top:.7rem; }
+  .actions button { padding:.35rem .75rem; font-size:.85rem; }
 </style>
 </head>
 <body>
@@ -70,6 +79,12 @@
   <button id="mic">Start</button>
   <span id="state"><span id="dot"></span><span id="label">idle</span></span>
 </header>
+<div id="mode" role="group" aria-label="Learning mode">
+  <button type="button" data-mode="guided">Guided lessons</button>
+  <button type="button" data-mode="conversation">Conversation</button>
+</div>
+<div id="mode-help"></div>
+<div id="voice-status" role="status"></div>
 <div id="log"></div>
 
 <script type="module">
@@ -79,9 +94,15 @@ const log = document.getElementById('log');
 const dot = document.getElementById('dot');
 const label = document.getElementById('label');
 const micBtn = document.getElementById('mic');
+const modeHelp = document.getElementById('mode-help');
+const voiceStatus = document.getElementById('voice-status');
+const modeButtons = [...document.querySelectorAll('#mode button')];
 
 const HEADER_BYTES = 26;      // OCH1 + version + kind + u32 seq + UUID
 let ws, audioCtx, node, stream, playAt = 0, interimEl = null, tutorEl = null;
+let lessonEl = null, guidedAudioBatch = [], mediaQueue = [], mediaBusy = false;
+let currentMode = localStorage.getItem('ocha.mode');
+if (!['guided', 'conversation'].includes(currentMode)) currentMode = 'guided';
 const scheduled = new Map(); // exchange UUID -> {source,start,end,seq,kind}[]
 const clientIntervals = new Map();
 const clientVisible = new Map();
@@ -142,8 +163,36 @@ function turn(kind, who) {
   return el;
 }
 
+function updateMode() {
+  for (const button of modeButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.mode === currentMode));
+  }
+  modeHelp.textContent = currentMode === 'guided'
+    ? 'Start here: listen, repeat, then recall useful Japanese.'
+    : 'Japanese audio with romaji and a complete English meaning.';
+}
+
+for (const button of modeButtons) {
+  button.onclick = () => {
+    if (button.dataset.mode === currentMode) return;
+    const running = ws?.readyState === WebSocket.OPEN;
+    if (running) stop();
+    currentMode = button.dataset.mode;
+    localStorage.setItem('ocha.mode', currentMode);
+    log.replaceChildren();
+    lessonEl = tutorEl = interimEl = null;
+    updateMode();
+    if (running) start();
+  };
+}
+updateMode();
+
 function onMessage(ev) {
-  if (ev.data instanceof ArrayBuffer) return play(ev.data);
+  if (ev.data instanceof ArrayBuffer) {
+    if (currentMode === 'guided') guidedAudioBatch.push(ev.data);
+    else play(ev.data);
+    return;
+  }
   const m = JSON.parse(ev.data);
   if (!m.exchange_id || !Number.isInteger(m.seq)) {
     throw new Error('Unattributed Ocha JSON event');
@@ -166,6 +215,16 @@ function onMessage(ev) {
     if (!tutorEl) tutorEl = turn('tutor', 'ocha');
     tutorEl.querySelector('.jp').textContent += m.text;
     retainVisible(m);
+  } else if (m.type === 'reply_aids') {
+    if (!tutorEl) tutorEl = turn('tutor', 'ocha');
+    addAid(tutorEl, 'romaji', m.romaji);
+    addAid(tutorEl, 'meaning', m.meaning_en);
+    retainVisible(m);
+  } else if (m.type === 'lesson') {
+    flushGuidedAudio();
+    renderLesson(m);
+    enqueueEnglish(m.instruction_en);
+    retainVisible(m);
   } else if (m.type === 'grammar') {
     grammar(m);
     retainVisible(m);
@@ -176,7 +235,120 @@ function onMessage(ev) {
     retainVisible(m);
   } else if (m.type === 'interrupt') {
     cancelExchange(m.exchange_id);
+  } else if (m.type === 'tutor_error') {
+    const el = turn('grammar', 'please retry');
+    el.querySelector('.jp').textContent = m.text;
+    retainVisible(m);
   }
+}
+
+function addAid(el, className, text) {
+  let aid = el.querySelector('.' + className);
+  if (!aid) {
+    aid = document.createElement('div');
+    aid.className = className;
+    el.append(aid);
+  }
+  aid.textContent = text || '';
+}
+
+function renderLesson(m) {
+  if (!lessonEl || lessonEl.dataset.step !== m.step_id) {
+    lessonEl = turn('tutor', m.lesson_title || 'guided lesson');
+    lessonEl.dataset.step = m.step_id;
+  }
+  lessonEl.replaceChildren();
+  const who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = m.lesson_title || 'guided lesson';
+  const instruction = document.createElement('div');
+  instruction.className = 'instruction';
+  instruction.textContent = m.instruction_en;
+  const jp = document.createElement('div');
+  jp.className = 'jp';
+  jp.textContent = m.show_japanese ? m.japanese : '•••';
+  lessonEl.append(who, instruction, jp);
+  if (m.show_romaji) addAid(lessonEl, 'romaji', m.romaji);
+  addAid(lessonEl, 'meaning', m.meaning_en);
+  if (m.phase !== 'complete') {
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    for (const [action, text] of [['replay','Replay'], ['reveal','Reveal'], ['skip','Skip']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = text;
+      button.onclick = () => lessonAction(action, m.lesson_id, m.step_id);
+      actions.append(button);
+    }
+    lessonEl.append(actions);
+  }
+  lessonEl.scrollIntoView({ block:'end' });
+}
+
+function lessonAction(action, lessonId, stepId) {
+  if (ws?.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type:'lesson_action', action,
+    lesson_id:lessonId, step_id:stepId }));
+}
+
+function flushGuidedAudio() {
+  if (!guidedAudioBatch.length) return;
+  const batch = guidedAudioBatch;
+  guidedAudioBatch = [];
+  mediaQueue.push({ type:'audio', buffers:batch });
+  processMediaQueue();
+}
+
+function enqueueEnglish(text) {
+  if (!text) return;
+  mediaQueue.push({ type:'speech', text });
+  processMediaQueue();
+}
+
+async function processMediaQueue() {
+  if (mediaBusy || !mediaQueue.length || !audioCtx) return;
+  mediaBusy = true;
+  while (mediaQueue.length && audioCtx) {
+    const item = mediaQueue.shift();
+    if (item.type === 'speech') await speakLocalEnglish(item.text);
+    else {
+      for (const buffer of item.buffers) play(buffer);
+      const waitMs = Math.max(0, (playAt - audioCtx.currentTime) * 1000);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
+  mediaBusy = false;
+}
+
+async function localEnglishVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  let voices = speechSynthesis.getVoices();
+  if (!voices.length) {
+    await new Promise(resolve => {
+      const done = () => { speechSynthesis.removeEventListener('voiceschanged', done); resolve(); };
+      speechSynthesis.addEventListener('voiceschanged', done);
+      setTimeout(done, 500);
+    });
+    voices = speechSynthesis.getVoices();
+  }
+  return voices.find(voice => voice.localService && /^en(-|_)/i.test(voice.lang)) || null;
+}
+
+async function speakLocalEnglish(text) {
+  const voice = await localEnglishVoice();
+  if (!voice) {
+    voiceStatus.textContent = 'English audio is unavailable; instructions remain visible as text.';
+    return;
+  }
+  voiceStatus.textContent = '';
+  await new Promise(resolve => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = voice;
+    utterance.lang = voice.lang;
+    utterance.rate = 0.9;
+    utterance.onend = utterance.onerror = resolve;
+    speechSynthesis.speak(utterance);
+  });
 }
 
 function retainVisible(m) {
@@ -328,14 +500,17 @@ async function connect() {
   await audioCtx.audioWorklet.addModule(
     URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' })));
 
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?mode=${currentMode}`);
   ws.binaryType = 'arraybuffer';
   ws.onmessage = onMessage;
   ws.onclose = () => { setState('idle'); micBtn.disabled = false; micBtn.textContent = 'Start'; };
   await new Promise(r => ws.onopen = r);
 
   node = new AudioWorkletNode(audioCtx, 'capture');
-  node.port.onmessage = e => { if (ws.readyState === 1) ws.send(e.data); };
+  node.port.onmessage = e => {
+    const appIsSpeaking = mediaBusy || audioCtx.currentTime < playAt;
+    if (ws.readyState === 1 && !appIsSpeaking) ws.send(e.data);
+  };
   audioCtx.createMediaStreamSource(stream).connect(node);
   // Not connected to destination: the worklet produces no output, and routing the
   // microphone to the speakers is a feedback loop.
@@ -347,12 +522,17 @@ async function connect() {
 }
 
 function stop() {
+  flushGuidedAudio();
   ws?.close();
   stream?.getTracks().forEach(t => t.stop());
   audioCtx?.close();
   audioCtx = null;
   playAt = 0;
   scheduled.clear();
+  guidedAudioBatch = [];
+  mediaQueue = [];
+  mediaBusy = false;
+  window.speechSynthesis?.cancel();
   micBtn.textContent = 'Start';
   micBtn.onclick = start;
   setState('idle');

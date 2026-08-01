@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipecat.frames.frames import OutputTransportMessageUrgentFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    OutputTransportMessageUrgentFrame,
+    TranscriptionFrame,
+    TTSAudioRawFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.tests.utils import run_test
 from pipecat.transcriptions.language import Language
@@ -10,11 +14,31 @@ from pipecat.transcriptions.language import Language
 from ocha.db import connect, migrate
 from ocha.db.seed import seed
 from ocha.speech.guided_stage import GuidedLessonStage, LessonTargetFrame
+from ocha.speech.tts import VoicevoxTTS
 from ocha.speech.wire import LessonActionFrame
 
 
 def _transcript(text: str) -> TranscriptionFrame:
     return TranscriptionFrame(text, "", "2026-08-01T00:00:00Z", language=Language.JA)
+
+
+class StubVoicevox(VoicevoxTTS):
+    def __init__(self) -> None:
+        super().__init__(sample_rate=16_000)
+        self.spoken: list[str] = []
+
+    def _synthesise(self, text: str) -> bytes:
+        self.spoken.append(text)
+        return b"\x00\x00" * 160
+
+
+async def test_initial_guided_target_is_spoken_in_japanese(tmp_path: Path) -> None:
+    conn = connect(tmp_path / "audio.db")
+    migrate(conn)
+    tts = StubVoicevox()
+    down, _ = await run_test(Pipeline([GuidedLessonStage(conn), tts]), frames_to_send=[])
+    assert tts.spoken == ["こんにちは"]
+    assert any(isinstance(frame, TTSAudioRawFrame) for frame in down)
 
 
 async def test_guided_step_requires_repeat_then_hidden_recall(tmp_path: Path) -> None:
